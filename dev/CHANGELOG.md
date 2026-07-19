@@ -6,6 +6,13 @@ are kept in code as `__version__` / `VERSION` and listed in `MANIFEST.txt`
 
 ## Bundle history
 
+### 1.5.2 — 2026-07-19
+- OTA reworked to pull over plain HTTP from a LAN proxy (ota.py 3.0.0). On-device
+  TLS to GitHub failed with heap fragmentation (`MBEDTLS_ERR_X509_ALLOC_FAILED`
+  even at 90 KB free), so a Node-RED flow now proxies the private repo: ESP32 →
+  HTTP → Node-RED → HTTPS → GitHub. No TLS/token on the device. Config `ota` uses
+  `base_url` instead of `repo`/`token`. See `Node-RED Firebase/ota-proxy-flow.json`.
+
 ### 1.5.1 — 2026-07-19
 - Dashboard: the raw MQTT payload is now pretty-printed (client-side JS), and the
   "Check for update" button is centered.

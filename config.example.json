@@ -1,5 +1,5 @@
 {
-    "_version": "1.5.1",
+    "_version": "1.5.2",
     "_updated": "2026-07-19",
     "_desc": "Device + network + feature settings (copy to config.json, fill secrets)",
     "device": {
@@ -46,9 +46,7 @@
     "ota": {
         "enabled": false,
         "auto": false,
-        "repo": "viiartztoo/weather-firmware",
-        "branch": "main",
-        "token": "YOUR_GITHUB_TOKEN",
+        "base_url": "http://192.168.1.40:1880/endpoint/firmware/",
         "manifest": "version.json",
         "check_interval": 86400,
         "timeout": 20

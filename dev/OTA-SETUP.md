@@ -1,84 +1,87 @@
-# OTA setup (private GitHub repo)
+# OTA setup (via Node-RED proxy)
 
-The device pulls updated files from a **private** GitHub repo using the REST API
-with a personal-access token. It supports a manual "Check for update" button on
-the device page and an optional automatic check.
+The ESP32 can't do a reliable TLS handshake to GitHub (heap fragmentation -
+`MBEDTLS_ERR_X509_ALLOC_FAILED` even with 90 KB free). So OTA pulls firmware over
+plain **HTTP from the LAN**, and Node-RED does the GitHub HTTPS.
 
-## How it works
+```
+ESP32 --HTTP--> Node-RED /firmware/<file> --HTTPS--> GitHub (private repo)
+```
 
-1. Device reads `version.json` from the repo (`GET /repos/OWNER/REPO/contents/version.json`).
-2. If the repo `version` is newer than the running `main.py` `__version__`, it
-   downloads each file in `version.json`'s `files` list to `*.new`.
-3. Only after **all** download OK does it swap them in and reboot.
-4. During the download the onboard web server is paused (frees RAM/CPU for TLS).
+- No TLS on the device, no token on the device.
+- GitHub stays the source of truth; the token lives only in Node-RED.
 
 ## One-time setup
 
-### 1. Create a fine-grained personal access token
-- GitHub ▸ **Settings ▸ Developer settings ▸ Personal access tokens ▸
-  Fine-grained tokens ▸ Generate new token**.
-- **Repository access**: Only select repositories → `weather-firmware`.
-- **Permissions**: Repository permissions ▸ **Contents: Read-only**.
-- Generate and copy the token (starts with `github_pat_...`).
+### 1. Node-RED: import the OTA proxy flow
+- Import `Node-RED Firebase/ota-proxy-flow.json` (☰ ▸ Import).
+- It adds an `OTA Proxy` tab: **http in `/firmware/:file` → function → http request → http response**.
 
-> Read-only + single-repo keeps the blast radius tiny if the token leaks.
+### 2. Give Node-RED the GitHub token
+The function node needs a fine-grained PAT (single repo `weather-firmware`,
+**Contents: Read-only**). Either:
+- set a Node-RED environment variable `GITHUB_TOKEN`, or
+- open the **Build GitHub URL** function node and replace `REPLACE_WITH_GITHUB_TOKEN`.
 
-### 2. Put the token in the device config
-In `config.json` ▸ `ota`:
+> If your old token was pasted in chat, revoke it on GitHub and make a new one.
+
+Then **Deploy**.
+
+### 3. Test the proxy from your PC
+Open in a browser (or curl):
+```
+http://192.168.1.40:1880/endpoint/firmware/version.json
+```
+You should get the raw `version.json` from the repo. If you get 404/401, the
+token or repo path in the function node is wrong.
+
+> **Home Assistant add-on:** the HA Node-RED add-on serves all http-in nodes
+> under an `/endpoint/` prefix (httpNodeRoot). So the node URL `/firmware/:file`
+> is reached at `.../endpoint/firmware/<file>`. Standalone Node-RED has no such
+> prefix (`.../firmware/<file>`). Set `base_url` to match your setup.
+
+### 4. Point the device at the proxy
+`config.json` ▸ `ota` (already set):
 ```json
 "ota": {
     "enabled": true,
     "auto": false,
-    "repo": "viiartztoo/weather-firmware",
-    "branch": "main",
-    "token": "github_pat_XXXXXXXX",
+    "base_url": "http://192.168.1.40:1880/firmware/",
     "manifest": "version.json",
     "check_interval": 86400,
     "timeout": 20
 }
 ```
-- `enabled`: master switch.
-- `auto`: `false` = manual only (button); `true` = also self-check every
-  `check_interval` seconds.
+Adjust the IP/port if your Node-RED isn't at `192.168.1.40:1880`.
 
-### 3. Push the current firmware to the repo
-The repo must contain the files listed in `version.json` at its root. From the
-firmware folder:
+### 5. Push firmware to the repo
+The repo must contain the files listed in `version.json` at its root:
 ```bash
-git add -A
-git commit -m "Firmware 1.5.0"
-git push
+git add -A && git commit -m "Firmware 1.5.2" && git push
 ```
-Confirm on GitHub that `version.json`, `main.py`, `my_hw.py`, `ota.py`,
-`tools.py`, `dashboard.html` are at the repo root.
 
-> `config.json` is intentionally NOT in `version.json`'s file list, so OTA never
-> overwrites the device's own settings/secrets.
+## Using it
+
+On the device page click **Check for update**:
+- **Up to date · vX** - nothing to do.
+- **Update available · vX -> vY** - click **Update now**; it downloads over HTTP
+  and reboots.
+
+Serial shows: `[OTA] update available: X -> Y`, `[OTA] downloading main.py`, ...,
+`[OTA] updated to Y - rebooting`. (It may reboot twice - the second is
+`file_change_check` noticing `main.py` changed. Normal.)
 
 ## Publishing an update
 
-1. Edit code, bump the file's `@v` tag and `main.py` `__version__`.
-2. Bump `version` in `version.json` (and its `files` list if you added/renamed).
+1. Edit code; bump the file's `@v` tag + `main.py` `__version__`.
+2. Bump `version` in `version.json` (and its `files` list if needed).
 3. `git commit` + `git push`.
-4. On the device: open the page and click **Check for update** (or wait for the
-   auto check). It downloads, swaps, and reboots into the new version.
+4. Device ▸ **Check for update** ▸ **Update now**.
 
-## Testing checklist
+## Notes
 
-- With `enabled:true`, click **Check for update** while the running version is
-  older than the repo. Serial should show:
-  `[OTA] update available: X -> Y`, `[OTA] downloading main.py ...`,
-  `[OTA] updated to Y - rebooting`.
-- If already current: `[OTA] up to date (local Y, remote Y)`.
-- Auth failure (bad/expired token or wrong repo): `[OTA] manifest HTTP 404`
-  (private repos return 404, not 401, when unauthorized) — recheck the token
-  and `repo`.
-
-## Notes / gotchas
-
-- OTA does a TLS download on the ESP32 — heavy. Keep the web server pause in
-  place; don't hammer the device page during an update.
-- A bad `main.py` (syntax error) would boot-loop. Test changes on a spare board
-  or keep a known-good copy handy. (A future enhancement could add a rollback.)
-- GitHub private-repo raw access via `raw.githubusercontent.com` needs temporary
-  tokens; this uses the API contents endpoint instead, which works with a PAT.
+- `config.json` is not in `version.json`'s file list, so OTA never overwrites the
+  device's settings.
+- Node-RED must be running for OTA to work (it's the proxy).
+- A broken `main.py` pushed via OTA could boot-loop (no rollback yet). Test risky
+  changes on a spare board.
