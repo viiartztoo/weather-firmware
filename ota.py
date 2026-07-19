@@ -1,4 +1,4 @@
-# @v 2.0.0 | 2026-07-19 | GitHub OTA updater (private repo via API + token)
+# @v 2.1.0 | 2026-07-19 | GitHub OTA updater (private repo via API + token)
 try:
     import urequests as requests
 except ImportError:
@@ -10,7 +10,7 @@ import time
 import machine
 import gc
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __date__ = "2026-JUL-19"
 __author__ = "Rick Jara"
 
@@ -78,6 +78,26 @@ class OTAUpdater:
         if not self.enabled or not self.repo:
             return False
         return self.auto and (time.time() - self._last_check) >= self.interval
+
+    def check(self, feed=None):
+        """Fetch the manifest only (no download). Returns a tuple:
+        (ok, remote_version, available, error)."""
+        if not self.enabled or not self.repo:
+            return (False, None, False, "not configured")
+        self._last_check = time.time()
+        try:
+            r = self._get(self.manifest, feed)
+            if r.status_code != 200:
+                err = "HTTP %s" % r.status_code
+                r.close()
+                return (False, None, False, err)
+            manifest = json.loads(r.text)
+            r.close()
+        except Exception as e:
+            return (False, None, False, str(e))
+        remote = manifest.get("version", "0.0.0")
+        available = _parse_version(remote) > _parse_version(self.current_version)
+        return (True, remote, available, None)
 
     def check_and_update(self, feed=None, pause=None, resume=None):
         """Check GitHub and update if newer. Returns True if an update was

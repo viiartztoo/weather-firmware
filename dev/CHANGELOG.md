@@ -6,6 +6,14 @@ are kept in code as `__version__` / `VERSION` and listed in `MANIFEST.txt`
 
 ## Bundle history
 
+### 1.5.1 — 2026-07-19
+- Dashboard: the raw MQTT payload is now pretty-printed (client-side JS), and the
+  "Check for update" button is centered.
+- OTA UX: the /ota page now does check -> show result -> apply. Clicking "Check
+  for update" reports current vs available version; if newer, an "Update now"
+  button performs the download/reboot. No more ambiguous "will reboot if..."
+  message. ota.py gains a lightweight check() (manifest only, no download).
+
 ### 1.5.0 — 2026-07-19
 - OTA updates (ota.py 2.0.0): pulls from a **private** GitHub repo via the REST
   API with a token in the Authorization header. `gc.collect()` + one-file-at-a-

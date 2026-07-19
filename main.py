@@ -1,4 +1,4 @@
-# @v 1.5.0 | 2026-07-19 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA
+# @v 1.5.1 | 2026-07-19 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA
 import tools
 tools.crc_check()
 
@@ -13,7 +13,7 @@ import socket
 import _thread
 import gc
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 __date__ = "2026-JUL-19"
 __author__ = "Rick Jara"
 
@@ -29,7 +29,9 @@ latest_sensor_data = {
 peak_time_active = False
 last_mqtt_payload = "{}"  # exact JSON string last published to MQTT
 DASHBOARD_HTML = ""       # dashboard.html loaded once at boot (template)
-ota_requested = False     # set by the /ota web endpoint; handled in main loop
+ota_check_requested = False   # web asked to check for an update
+ota_apply_requested = False   # web asked to apply the pending update
+ota_status = None             # (ok, remote_version, available, error) from last check
 
 class WebServer:
     """Simple HTTP web server for serving webapp and sensor data"""
@@ -92,7 +94,9 @@ class WebServer:
                 return
 
             method = method_path[0]
-            path = method_path[1].split('?')[0]
+            full_path = method_path[1]
+            path = full_path.split('?')[0]
+            query = full_path[len(path) + 1:] if '?' in full_path else ''
 
             if path == '/' or path == '/index.html':
                 self._serve_dashboard(conn)
@@ -105,7 +109,7 @@ class WebServer:
             elif path == '/data':
                 self._serve_json(conn)
             elif path == '/ota':
-                self._handle_ota(conn)
+                self._handle_ota(conn, query)
             elif path == '/peak_update':
                 self._serve_peak_status(conn)
             elif path == '/save_peak_data' and method == 'POST':
@@ -149,23 +153,58 @@ class WebServer:
         except Exception as e:
             print(f"[WebServer] Error serving page: {e}")
 
-    def _handle_ota(self, conn):
-        """Manual OTA trigger - flags the main loop to check GitHub."""
-        global ota_requested
-        ota_requested = True
+    def _ota_page(self, title, msg, button=None, refresh=None):
+        """Build a styled OTA response. button=(label,href), refresh=(url,secs)."""
+        meta = ""
+        if refresh:
+            meta = "<meta http-equiv=refresh content='%d; url=%s'>" % (refresh[1], refresh[0])
+        btn = ""
+        if button:
+            btn = ("<p style='margin-top:20px'><a href='%s' style='display:inline-block;"
+                   "background:#1f6feb;color:#fff;text-decoration:none;padding:10px 20px;"
+                   "border-radius:8px;font-size:.9rem'>%s</a></p>") % (button[1], button[0])
         body = (
             "<!DOCTYPE html><html><head><meta charset=utf-8>"
-            "<meta http-equiv=refresh content='10; url=/'>"
-            "<title>OTA</title></head>"
-            "<body style='font-family:system-ui,sans-serif;background:#0f1720;color:#e5edf5;text-align:center;padding:3em'>"
-            "<h2>Update check scheduled</h2>"
-            "<p>The device will check GitHub and reboot if a newer version is found.</p>"
-            "<p>Reconnect in ~30 s. Returning to the dashboard...</p></body></html>"
-        )
-        response = ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    "Content-Length: %d\r\nConnection: close\r\n\r\n%s") % (len(body), body)
+            "<meta name=viewport content='width=device-width,initial-scale=1'>"
+            "%s<title>OTA</title></head>"
+            "<body style='font-family:system-ui,sans-serif;background:#0f1720;color:#e5edf5;text-align:center;padding:3em 1em'>"
+            "<h2>%s</h2><p style='color:#9fb3c8'>%s</p>%s"
+            "<p style='margin-top:10px;font-size:.8rem'><a href='/' style='color:#7d93a8'>&larr; dashboard</a></p>"
+            "</body></html>"
+        ) % (meta, title, msg, btn)
+        return ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                "Content-Length: %d\r\nConnection: close\r\n\r\n%s") % (len(body), body)
+
+    def _handle_ota(self, conn, query):
+        """OTA page: check -> show result -> apply. Work is done by the main loop."""
+        global ota_check_requested, ota_apply_requested, ota_status
+        if "apply" in query:
+            ota_apply_requested = True
+            resp = self._ota_page("Updating",
+                                  "Downloading the update. The device will reboot; reconnect in ~30 s.",
+                                  refresh=("/", 30))
+        elif "check" in query:
+            ota_check_requested = True
+            ota_status = None
+            resp = self._ota_page("Checking for updates", "Contacting GitHub...",
+                                  refresh=("/ota", 6))
+        elif ota_status is None:
+            resp = self._ota_page("Firmware", "Current version: v%s" % __version__,
+                                  button=("Check for update", "/ota?check=1"))
+        else:
+            ok, remote, available, err = ota_status
+            if not ok:
+                resp = self._ota_page("Check failed", "Error: %s" % err,
+                                      button=("Try again", "/ota?check=1"))
+            elif available:
+                resp = self._ota_page("Update available",
+                                      "Current v%s &rarr; available v%s" % (__version__, remote),
+                                      button=("Update now", "/ota?apply=1"))
+            else:
+                resp = self._ota_page("Up to date", "Running the latest: v%s" % __version__,
+                                      button=("Check again", "/ota?check=1"))
         try:
-            conn.send(response.encode('utf-8'))
+            conn.send(resp.encode('utf-8'))
         except Exception as e:
             print(f"[WebServer] Error serving OTA page: {e}")
 
@@ -295,7 +334,8 @@ def main():
     if sensor is None:
         raise RuntimeError("Failed to initialize BME280 sensor")
 
-    global latest_sensor_data, last_mqtt_payload, DASHBOARD_HTML, ota_requested
+    global latest_sensor_data, last_mqtt_payload, DASHBOARD_HTML
+    global ota_check_requested, ota_apply_requested, ota_status
     uptime_tracker = UptimeTracker()
 
     web_server = None
@@ -404,19 +444,38 @@ def main():
                 color_printer.print_color(f"MQTT publish error: {e}", "red")
 
             feed_cb = heartbeat.feed if PRODUCTION else None
+            _pause = web_server.pause if web_server else None
+            _resume = web_server.resume if web_server else None
 
-            # OTA: manual (web /ota) or automatic (config ota.auto + interval).
-            # Pause the web server during the TLS download so it doesn't
-            # compete for the GIL/heap (the reason direct cloud TLS failed).
+            # OTA check (manual): fetch manifest only, store result for the page.
             try:
-                if ota_requested or ota_updater.due():
-                    ota_requested = False
-                    color_printer.print_color("OTA    : checking for update...", "yellow")
-                    _pause = web_server.pause if web_server else None
-                    _resume = web_server.resume if web_server else None
-                    ota_updater.check_and_update(feed=feed_cb, pause=_pause, resume=_resume)
+                if ota_check_requested:
+                    ota_check_requested = False
+                    color_printer.print_color("OTA    : checking...", "yellow")
+                    if _pause:
+                        _pause()
+                    try:
+                        ota_status = ota_updater.check(feed=feed_cb)
+                    finally:
+                        if _resume:
+                            _resume()
+                    if ota_status[0]:
+                        color_printer.print_color("OTA    : %s (local %s, remote %s)" % (
+                            "update available" if ota_status[2] else "up to date",
+                            __version__, ota_status[1]), "yellow")
+                    else:
+                        color_printer.print_color("OTA    : check failed - %s" % ota_status[3], "red")
             except Exception as e:
                 color_printer.print_color(f"OTA check error: {e}", "red")
+
+            # OTA apply: manual "Update now" button, or automatic scheduled update.
+            try:
+                if ota_apply_requested or ota_updater.due():
+                    ota_apply_requested = False
+                    color_printer.print_color("OTA    : applying update...", "yellow")
+                    ota_updater.check_and_update(feed=feed_cb, pause=_pause, resume=_resume)
+            except Exception as e:
+                color_printer.print_color(f"OTA apply error: {e}", "red")
 
             color_printer.print_color("T: ", "white", crlf=False)
             color_printer.print_color(f"{tempC:6.1f} °C", "red", crlf=False)
@@ -435,7 +494,7 @@ def main():
 
             # Sleep in 1s chunks so a manual OTA request is picked up quickly.
             for _ in range(30):
-                if ota_requested:
+                if ota_check_requested or ota_apply_requested:
                     break
                 sleep_ms(1000)
             tools.file_change_check()
