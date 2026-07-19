@@ -6,6 +6,12 @@ are kept in code as `__version__` / `VERSION` and listed in `MANIFEST.txt`
 
 ## Bundle history
 
+### 1.6.0 — 2026-07-19
+- Device settings page (`/settings`): edit the watchdog (enable + timeout) and
+  verbose logging from the browser. Saving writes config.json atomically and
+  reboots to apply. Added a plain "Reboot now" button (`/reboot`) and a Settings
+  link on the dashboard.
+
 ### 1.5.3 — 2026-07-19
 - Version bump to exercise the HTTP OTA path end-to-end (download + reboot).
 

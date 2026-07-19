@@ -1,4 +1,4 @@
-# @v 1.5.3 | 2026-07-19 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA
+# @v 1.6.0 | 2026-07-19 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -12,8 +12,10 @@ import time
 import socket
 import _thread
 import gc
+import os
+import machine
 
-__version__ = "1.5.3"
+__version__ = "1.6.0"
 __date__ = "2026-JUL-19"
 __author__ = "Rick Jara"
 
@@ -32,6 +34,7 @@ DASHBOARD_HTML = ""       # dashboard.html loaded once at boot (template)
 ota_check_requested = False   # web asked to check for an update
 ota_apply_requested = False   # web asked to apply the pending update
 ota_status = None             # (ok, remote_version, available, error) from last check
+CONFIG = None                 # the loaded config dict (for the settings page)
 
 class WebServer:
     """Simple HTTP web server for serving webapp and sensor data"""
@@ -110,6 +113,10 @@ class WebServer:
                 self._serve_json(conn)
             elif path == '/ota':
                 self._handle_ota(conn, query)
+            elif path == '/settings':
+                self._handle_settings(conn, query)
+            elif path == '/reboot':
+                self._handle_reboot(conn)
             elif path == '/peak_update':
                 self._serve_peak_status(conn)
             elif path == '/save_peak_data' and method == 'POST':
@@ -208,6 +215,109 @@ class WebServer:
         except Exception as e:
             print(f"[WebServer] Error serving OTA page: {e}")
 
+    def _qs(self, q):
+        d = {}
+        for part in q.split("&"):
+            if not part:
+                continue
+            if "=" in part:
+                k, v = part.split("=", 1)
+                d[k] = v
+            else:
+                d[part] = ""
+        return d
+
+    def _send_html(self, conn, body):
+        response = ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                    "Content-Length: %d\r\nConnection: close\r\n\r\n%s") % (len(body), body)
+        try:
+            conn.send(response.encode('utf-8'))
+        except Exception as e:
+            print("[WebServer] Error sending:", e)
+
+    def _save_config(self):
+        """Atomically write CONFIG back to config.json. Returns True on success."""
+        global CONFIG
+        try:
+            with open("config.json.new", "w") as f:
+                json.dump(CONFIG, f)
+            try:
+                os.remove("config.json")
+            except OSError:
+                pass
+            os.rename("config.json.new", "config.json")
+            return True
+        except Exception as e:
+            print("[Settings] save failed:", e)
+            try:
+                os.remove("config.json.new")
+            except OSError:
+                pass
+            return False
+
+    def _notice(self, title, msg, reboot=False):
+        meta = "<meta http-equiv=refresh content='30; url=/'>" if reboot else ""
+        return (
+            "<!DOCTYPE html><html><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'>%s<title>%s</title></head>"
+            "<body style='font-family:system-ui,sans-serif;background:#0f1720;color:#e5edf5;text-align:center;padding:3em 1em'>"
+            "<h2>%s</h2><p style='color:#9fb3c8'>%s</p></body></html>"
+        ) % (meta, title, title, msg)
+
+    def _handle_settings(self, conn, query):
+        """Show / apply device settings (watchdog, verbose logging), then reboot."""
+        global CONFIG
+        wd = CONFIG.get("watchdog", {})
+        lg = CONFIG.get("logging", {})
+        params = self._qs(query)
+
+        if "apply" in params:
+            CONFIG.setdefault("watchdog", {})["enabled"] = ("wd" in params)
+            try:
+                CONFIG["watchdog"]["timeout_ms"] = int(params.get("to", wd.get("timeout_ms", 40000)))
+            except ValueError:
+                pass
+            CONFIG.setdefault("logging", {})["verbose"] = ("verbose" in params)
+            if self._save_config():
+                self._send_html(conn, self._notice("Saved", "Settings written. Rebooting to apply...", reboot=True))
+                time.sleep(1)
+                machine.reset()
+            else:
+                self._send_html(conn, self._notice("Error", "Could not write config.json - no changes applied.", reboot=False))
+            return
+
+        wd_checked = "checked" if wd.get("enabled", True) else ""
+        v_checked = "checked" if lg.get("verbose", False) else ""
+        timeout = wd.get("timeout_ms", 40000)
+        body = (
+            "<!DOCTYPE html><html><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<title>Settings</title><style>"
+            "body{font-family:system-ui,sans-serif;background:#0f1720;color:#e5edf5;max-width:24em;margin:2em auto;padding:0 1em}"
+            "h2{font-size:1.2rem}label{display:block;margin:14px 0}"
+            "input[type=number]{width:8em;padding:6px;border-radius:6px;border:1px solid #26333f;background:#0b1118;color:#e5edf5}"
+            "button{background:#1f6feb;color:#fff;border:0;padding:10px 18px;border-radius:8px;font-size:.9rem;margin-top:10px}"
+            ".reboot{background:#b34747}a{color:#7d93a8}"
+            "</style></head><body>"
+            "<h2>Device settings</h2>"
+            "<form method='get' action='/settings'>"
+            "<input type='hidden' name='apply' value='1'>"
+            "<label><input type='checkbox' name='wd' %s> Watchdog enabled</label>"
+            "<label>Watchdog timeout (ms): <input type='number' name='to' value='%s'></label>"
+            "<label><input type='checkbox' name='verbose' %s> Verbose logging</label>"
+            "<button type='submit'>Save &amp; reboot</button></form>"
+            "<form method='get' action='/reboot' style='margin-top:24px'>"
+            "<button class='reboot' type='submit'>Reboot now</button></form>"
+            "<p style='margin-top:20px;font-size:.8rem'><a href='/'>&larr; dashboard</a></p>"
+            "</body></html>"
+        ) % (wd_checked, timeout, v_checked)
+        self._send_html(conn, body)
+
+    def _handle_reboot(self, conn):
+        self._send_html(conn, self._notice("Rebooting", "The device is rebooting. Reconnect in ~30 s.", reboot=True))
+        time.sleep(1)
+        machine.reset()
+
     def _serve_json(self, conn):
         """Serve JSON sensor data for /update endpoint"""
         global latest_sensor_data, peak_time_active
@@ -287,7 +397,8 @@ def main():
     config_manager = ConfigManager()
     config = config_manager.load_config("config.json")
 
-    global PRODUCTION
+    global PRODUCTION, CONFIG
+    CONFIG = config
     PRODUCTION = config.get("watchdog", {}).get("enabled", True)
     wdt_timeout = config.get("watchdog", {}).get("timeout_ms", 40000)
 

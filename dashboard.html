@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- @v 1.1.0 | 2026-07-19 | Onboard status page template ({{TOKENS}} filled at boot) -->
+<!-- @v 1.2.1 | 2026-07-19 | Onboard status page template ({{TOKENS}} filled at boot) -->
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="30">
@@ -17,7 +17,7 @@ h1{margin:0;font-size:1.3rem}
 .box{max-width:520px;margin:12px auto;padding:0 16px}
 .meta div{display:flex;justify-content:space-between;border-bottom:1px solid #26333f;padding:5px 0;font-size:.85rem;color:#9fb3c8}
 h2{font-size:.75rem;color:#7d93a8;text-transform:uppercase;letter-spacing:.05em;margin:18px 0 6px}
-pre{background:#0b1118;border:1px solid #26333f;border-radius:10px;padding:12px;overflow:auto;color:#9ae6b4;font-size:.8rem;white-space:pre-wrap;word-break:break-all;height:400px;}
+pre{background:#0b1118;border:1px solid #26333f;border-radius:10px;padding:12px;overflow:auto;color:#9ae6b4;font-size:.8rem;white-space:pre-wrap;word-break:break-all;}
 a{color:#7d93a8}
 </style></head><body>
 <header><h1>Outdoor Sensor</h1><div class="sub">{{HOST}} &middot; v{{VER}} &middot; auto-refresh 30s</div></header>
@@ -34,7 +34,10 @@ a{color:#7d93a8}
 </div>
 <div class="box"><h2>Raw MQTT payload</h2><pre id="raw">{{RAW}}</pre>
 <p style="font-size:.75rem"><a href="/mqtt_data">/mqtt_data</a> &middot; <a href="/data">/data</a></p>
-<p style="margin-top:14px;text-align:center"><a href="/ota" style="display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;padding:9px 16px;border-radius:8px;font-size:.85rem">Check for update</a></p></div>
+<p style="margin-top:14px;text-align:center">
+<a href="/settings" style="display:inline-block;background:#2b3947;color:#fff;text-decoration:none;padding:9px 16px;border-radius:8px;font-size:.85rem;margin:0 4px">Settings</a>
+<a href="/ota" style="display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;padding:9px 16px;border-radius:8px;font-size:.85rem;margin:0 4px">Check for update</a>
+</p></div>
 <script>
 (function(){try{var e=document.getElementById('raw');e.textContent=JSON.stringify(JSON.parse(e.textContent),null,2);}catch(x){}})();
 </script>

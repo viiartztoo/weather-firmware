@@ -1,6 +1,6 @@
 Outdoor Sensor Firmware - File Manifest
-Bundle version : 1.5.3   (from main.py @v tag)
-Generated      : 2026-07-19 06:53 UTC   by gen_manifest.py
+Bundle version : 1.6.0   (from main.py @v tag)
+Generated      : 2026-07-19 07:05 UTC   by gen_manifest.py
 Files          : 13
 
 File                 Type    Version  Updated             Description
@@ -8,15 +8,15 @@ File                 Type    Version  Updated             Description
 PiicoDev_BME280.py   module  1.0.0    2021-03 (vendored)  BME280 atmospheric sensor driver (Core Electronics)
 PiicoDev_Unified.py  module  1.1.0    2023-05 (vendored)  PiicoDev unified I2C driver (Core Electronics)
 boot.py              module  1.0.0    2026-07-19          Boot + WebREPL start
-config.example.json  config  1.5.3    2026-07-19          Device + network + feature settings (copy to config.json, fill secrets)
-config.json          config  1.5.3    2026-07-19          Device + network + feature settings
-dashboard.html       web     1.1.0    2026-07-19          Onboard status page template ({{TOKENS}} filled at boot)
+config.example.json  config  1.6.0    2026-07-19          Device + network + feature settings (copy to config.json, fill secrets)
+config.json          config  1.6.0    2026-07-19          Device + network + feature settings
+dashboard.html       web     1.2.1    2026-07-19          Onboard status page template ({{TOKENS}} filled at boot)
 file_state.txt       data    -        -                   -
-main.py              module  1.5.3    2026-07-19          App entry: main loop, sensor, MQTT publish, web dashboard, OTA
+main.py              module  1.6.0    2026-07-19          App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 my_hw.py             module  1.1.0    2026-07-19          Hardware/WiFi/MQTT managers + TimeSync
 ota.py               module  3.0.0    2026-07-19          OTA updater over plain HTTP (via a LAN proxy, e.g. Node-RED)
 tools.py             module  1.1.0    2026-07-19          Local file-change reboot check
-version.json         config  1.5.3    2026-07-19          OTA manifest (bundle version + file list)
+version.json         config  1.6.0    2026-07-19          OTA manifest (bundle version + file list)
 webrepl_cfg.py       module  1.0.0    2026-07-19          WebREPL password
 
 Per-file shorthand:  # @v <version> | <date> | <description>
