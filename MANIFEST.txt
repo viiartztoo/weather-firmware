@@ -1,0 +1,22 @@
+Outdoor Sensor Firmware - File Manifest
+Bundle version : 1.5.0   (from main.py @v tag)
+Generated      : 2026-07-19 05:26 UTC   by gen_manifest.py
+Files          : 12
+
+File                 Type    Version  Updated             Description
+---------------------------------------------------------------------
+PiicoDev_BME280.py   module  1.0.0    2021-03 (vendored)  BME280 atmospheric sensor driver (Core Electronics)
+PiicoDev_Unified.py  module  1.1.0    2023-05 (vendored)  PiicoDev unified I2C driver (Core Electronics)
+boot.py              module  1.0.0    2026-07-19          Boot + WebREPL start
+config.json          config  1.5.0    2026-07-19          Device + network + feature settings
+dashboard.html       web     1.0.0    2026-07-19          Onboard status page template ({{TOKENS}} filled at boot)
+file_state.txt       data    -        -                   -
+main.py              module  1.5.0    2026-07-19          App entry: main loop, sensor, MQTT publish, web dashboard, OTA
+my_hw.py             module  1.1.0    2026-07-19          Hardware/WiFi/MQTT managers + TimeSync
+ota.py               module  2.0.0    2026-07-19          GitHub OTA updater (private repo via API + token)
+tools.py             module  1.1.0    2026-07-19          Local file-change reboot check
+version.json         config  1.5.0    2026-07-19          OTA manifest (bundle version + file list)
+webrepl_cfg.py       module  1.0.0    2026-07-19          WebREPL password
+
+Per-file shorthand:  # @v <version> | <date> | <description>
+Regenerate with:     python gen_manifest.py   (history in dev/CHANGELOG.md)

@@ -1,0 +1,11 @@
+# Python bytecode from any desktop compile-checks (not used on MicroPython)
+__pycache__/
+*.pyc
+
+# Device-managed state
+file_state.txt
+
+# Secrets - keep OUT of the repo. Copy config.example.json -> config.json on the
+# device and fill in the real values. OTA never updates these (not in version.json).
+config.json
+webrepl_cfg.py

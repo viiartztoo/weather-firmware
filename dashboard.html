@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!-- @v 1.0.0 | 2026-07-19 | Onboard status page template ({{TOKENS}} filled at boot) -->
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Outdoor Sensor</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#0f1720;color:#e5edf5}
+header{padding:18px;text-align:center}
+h1{margin:0;font-size:1.3rem}
+.sub{color:#7d93a8;font-size:.8rem;margin-top:4px}
+.cards{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;padding:8px 12px}
+.card{background:#182430;border-radius:12px;padding:16px 22px;min-width:96px;text-align:center}
+.card .l{color:#7d93a8;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+.card .v{font-size:1.7rem;font-weight:600;margin-top:4px}
+.card .u{font-size:.85rem;color:#9fb3c8}
+.box{max-width:520px;margin:12px auto;padding:0 16px}
+.meta div{display:flex;justify-content:space-between;border-bottom:1px solid #26333f;padding:5px 0;font-size:.85rem;color:#9fb3c8}
+h2{font-size:.75rem;color:#7d93a8;text-transform:uppercase;letter-spacing:.05em;margin:18px 0 6px}
+pre{background:#0b1118;border:1px solid #26333f;border-radius:10px;padding:12px;overflow:auto;color:#9ae6b4;font-size:.8rem;white-space:pre-wrap;word-break:break-all;height:400px;}
+a{color:#7d93a8}
+</style></head><body>
+<header><h1>Outdoor Sensor</h1><div class="sub">{{HOST}} &middot; v{{VER}} &middot; auto-refresh 30s</div></header>
+<div class="cards">
+<div class="card"><div class="l">Temp</div><div class="v">{{TEMP}}<span class="u"> C</span></div></div>
+<div class="card"><div class="l">Humidity</div><div class="v">{{HUM}}<span class="u"> %</span></div></div>
+<div class="card"><div class="l">Pressure</div><div class="v">{{PRES}}<span class="u"> hPa</span></div></div>
+</div>
+<div class="box meta">
+<div><span>Updated</span><span>{{TS}}</span></div>
+<div><span>Uptime</span><span>{{UPTIME}}</span></div>
+<div><span>IP</span><span>{{IP}}</span></div>
+<div><span>Host</span><span>{{HOST}}</span></div>
+</div>
+<div class="box"><h2>Raw MQTT payload</h2><pre>{{RAW}}</pre>
+<p style="font-size:.75rem"><a href="/mqtt_data">/mqtt_data</a> &middot; <a href="/data">/data</a></p>
+<p style="margin-top:14px"><a href="/ota" style="display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;padding:9px 16px;border-radius:8px;font-size:.85rem">Check for update</a></p></div>
+</body></html>

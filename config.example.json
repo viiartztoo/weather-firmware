@@ -1,0 +1,56 @@
+{
+    "_version": "1.5.0",
+    "_updated": "2026-07-19",
+    "_desc": "Device + network + feature settings (copy to config.json, fill secrets)",
+    "device": {
+        "hostname": "esp32-bme280"
+    },
+    "wifi": {
+        "home_network": {
+            "ssid": "YOUR_WIFI_SSID",
+            "password": "YOUR_WIFI_PASSWORD",
+            "priority": 1,
+            "max_attempts": 10
+        }
+    },
+    "static_ip": {
+        "enabled": true,
+        "ip": "192.168.1.60",
+        "subnet": "255.255.255.0",
+        "gateway": "192.168.1.1",
+        "dns": "8.8.8.8"
+    },
+    "mqtt": {
+        "server": "192.168.1.40",
+        "port": 1883,
+        "username": "mqtt_user",
+        "password": "YOUR_MQTT_PASSWORD"
+    },
+    "watchdog": {
+        "enabled": true,
+        "timeout_ms": 40000
+    },
+    "logging": {
+        "verbose": false
+    },
+    "webserver": {
+        "enabled": true,
+        "port": 80
+    },
+    "time": {
+        "ntp_enabled": true,
+        "ntp_hosts": ["au.pool.ntp.org", "pool.ntp.org"],
+        "utc_offset_hours": 10,
+        "retries": 3
+    },
+    "ota": {
+        "enabled": false,
+        "auto": false,
+        "repo": "viiartztoo/weather-firmware",
+        "branch": "main",
+        "token": "YOUR_GITHUB_TOKEN",
+        "manifest": "version.json",
+        "check_interval": 86400,
+        "timeout": 20
+    }
+}
