@@ -6,6 +6,9 @@ are kept in code as `__version__` / `VERSION` and listed in `MANIFEST.txt`
 
 ## Bundle history
 
+### 1.5.3 — 2026-07-19
+- Version bump to exercise the HTTP OTA path end-to-end (download + reboot).
+
 ### 1.5.2 — 2026-07-19
 - OTA reworked to pull over plain HTTP from a LAN proxy (ota.py 3.0.0). On-device
   TLS to GitHub failed with heap fragmentation (`MBEDTLS_ERR_X509_ALLOC_FAILED`
