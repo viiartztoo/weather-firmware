@@ -1,4 +1,4 @@
-# @v 1.7.1 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+# @v 1.7.2 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -15,7 +15,7 @@ import gc
 import os
 import machine
 
-__version__ = "1.7.1"
+__version__ = "1.7.2"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -164,6 +164,7 @@ class WebServer:
         self.port = port
         self.socket = None
         self.paused = False
+        self.running = False
 
     def pause(self):
         """Stop servicing requests (frees the GIL/RAM for an OTA download)."""
@@ -173,16 +174,41 @@ class WebServer:
         self.paused = False
 
     def start(self):
-        """Start the web server in a separate thread"""
+        """Bind the port and run the accept loop in its own thread.
+
+        Returns True on success. Starting a thread needs a contiguous stack
+        allocation, which on a heap this tight fails on some boots and not
+        others - so failure must leave self.socket as None and be retryable,
+        rather than silently leaving the device with no web interface until
+        someone climbs up to it.
+        """
         try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.socket.bind(('0.0.0.0', self.port))
-            self.socket.listen(5)
-            self.socket.settimeout(0.1)
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(('0.0.0.0', self.port))
+            s.listen(5)
+            s.settimeout(0.1)
+            self.socket = s
             _thread.start_new_thread(self._server_loop, ())
+            self.running = True
+            return True
         except Exception as e:
-            print(f"[WebServer] Failed to start: {e}")
+            print("[WebServer] Failed to start: %s" % e)
+            try:
+                if self.socket:
+                    self.socket.close()
+            except Exception:
+                pass
+            self.socket = None
+            self.running = False
+            return False
+
+    def ensure_started(self):
+        """Retry a failed start. Called every cycle from the main loop."""
+        if self.running and self.socket:
+            return True
+        gc.collect()
+        return self.start()
 
     def _server_loop(self):
         """Main server loop running in separate thread"""
@@ -202,6 +228,7 @@ class WebServer:
             except Exception as e:
                 print(f"[WebServer] Error accepting connection: {e}")
                 sleep_ms(100)
+        self.running = False
 
     def _handle_request(self, conn, addr):
         """Handle individual HTTP request"""
@@ -615,12 +642,29 @@ def main():
 
     device_setup = DeviceSetup("ESP32")
 
-    global EVENTS, MQTT, WIFI
+    global EVENTS, MQTT, WIFI, DASHBOARD_HTML
     EVENTS = EventLog(limit=config.get("logging", {}).get("event_limit", 40))
 
     wifi_manager = WiFiManager()
     WIFI = wifi_manager
     wifi_manager.connect()
+
+    web_server = None
+    ws_cfg = config.get("webserver", {})
+    if ws_cfg.get("enabled", True):
+        try:
+            with open("dashboard.html") as f:
+                DASHBOARD_HTML = f.read()
+        except OSError:
+            DASHBOARD_HTML = "<html><body>dashboard.html missing</body></html>"
+        ws_port = ws_cfg.get("port", 80)
+        web_server = WebServer(port=ws_port)
+        if web_server.start():
+            color_printer.print_color(f"Web    : http://{wifi_manager.get_ip()}:{ws_port}/", "green")
+        else:
+            color_printer.print_color("Web    : start FAILED - will retry each cycle", "red")
+    else:
+        color_printer.print_color("Web    : disabled", "yellow")
 
     time_sync = TimeSync(config)
     if time_sync.sync():
@@ -671,25 +715,9 @@ def main():
     if sensor is None:
         raise RuntimeError("Failed to initialize BME280 sensor")
 
-    global latest_sensor_data, last_mqtt_payload, DASHBOARD_HTML
+    global latest_sensor_data, last_mqtt_payload
     global ota_check_requested, ota_apply_requested, ota_status
     uptime_tracker = UptimeTracker()
-
-    web_server = None
-    ws_cfg = config.get("webserver", {})
-    if ws_cfg.get("enabled", True):
-
-        try:
-            with open("dashboard.html") as f:
-                DASHBOARD_HTML = f.read()
-        except OSError:
-            DASHBOARD_HTML = "<html><body>dashboard.html missing</body></html>"
-        ws_port = ws_cfg.get("port", 80)
-        web_server = WebServer(port=ws_port)
-        web_server.start()
-        color_printer.print_color(f"Web    : http://{wifi_manager.get_ip()}:{ws_port}/", "green")
-    else:
-        color_printer.print_color("Web    : disabled", "yellow")
 
     if PRODUCTION:
         heartbeat = Heartbeat(timeout=wdt_timeout)
@@ -807,6 +835,13 @@ def main():
             if cycle % 10 == 0 and mqtt_manager.connected:
                 mqtt_manager.ping()
 
+            if web_server and not web_server.running:
+                if web_server.ensure_started():
+                    EVENTS.add("info", "Web server started on retry")
+                    color_printer.print_color("Web    : started on retry", "green")
+                elif cycle % 10 == 1:
+                    color_printer.print_color("Web    : still down - retrying", "yellow")
+
             feed_cb = heartbeat.feed if PRODUCTION else None
             _pause = web_server.pause if web_server else None
             _resume = web_server.resume if web_server else None
@@ -848,6 +883,19 @@ def main():
 
             color_printer.print_color(", TS: ", "white", crlf=False)
             color_printer.print_color(f"{timestamp}", "blue")
+
+            _state = "OK " if (mqtt_manager.connected and published) else "BAD"
+            _col = "green" if _state == "OK " else "red"
+            color_printer.print_color("Status: ", "white", crlf=False)
+            color_printer.print_color(
+                "%s | wifi %s | mqtt %s | last pub %s | %s | web %s" % (
+                    _state,
+                    _wifi_text(),
+                    _mqtt_state_text(),
+                    _last_pub_text(),
+                    _mem_text(),
+                    "up" if (web_server and web_server.running) else "DOWN"),
+                _col)
 
             if PRODUCTION:
                 heartbeat.feed()
