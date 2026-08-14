@@ -43,6 +43,23 @@ EVENTS = None                 # EventLog - state changes, survives a reboot
 MQTT = None                   # MQTTManager, so the web thread can read health
 WIFI = None                   # WiFiManager, same reason
 
+def _mem_text():
+    """Free heap, and the largest block that can actually be allocated.
+
+    The second number is the one that matters. An OTA reads a whole source
+    file into RAM, so a heap with 60 KB free but badly fragmented can still
+    fail an update. Watch this trend to decide whether MicroPython is running
+    out of room on this board.
+    """
+    try:
+        gc.collect()
+        free = gc.mem_free()
+        alloc = gc.mem_alloc()
+        return "%d KB free / %d KB used" % (free // 1024, alloc // 1024)
+    except Exception:
+        return "unknown"
+
+
 def _read_ota_error():
     """The reason the last OTA attempt failed, if any. ota.py writes this to
     flash because the device has no serial console in the field."""
@@ -280,6 +297,7 @@ class WebServer:
         html = html.replace("{{COUNTS}}", _counts_text())
         html = html.replace("{{WIFI}}", _wifi_text())
         html = html.replace("{{EVENTS}}", EVENTS.as_html(12) if EVENTS else "")
+        html = html.replace("{{MEM}}", _mem_text())
 
         response = ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
                     "Content-Length: %d\r\nConnection: close\r\n\r\n%s") % (len(html), html)
@@ -300,7 +318,9 @@ class WebServer:
             "ip_address": latest_sensor_data.get("ip_address", ""),
             "stale_after_s": STALE_AFTER_S,
             "mqtt": MQTT.health() if MQTT else {},
-            "last_ota_error": _read_ota_error()
+            "last_ota_error": _read_ota_error(),
+            "mem_free": gc.mem_free(),
+            "mem_alloc": gc.mem_alloc()
         }
         secs = payload["mqtt"].get("seconds_since_ok") if payload["mqtt"] else None
         payload["healthy"] = bool(
