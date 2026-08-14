@@ -6,6 +6,42 @@ are kept in code as `__version__` / `VERSION` and listed in `MANIFEST.txt`
 
 ## Bundle history
 
+### 1.7.0 — 2026-08-15
+Fixes a 20-day silent outage: the device stayed up, read the sensor, served its
+web page and looked healthy while publishing into a dead socket. Nothing on the
+device or the cloud dashboard indicated a problem.
+
+- **MQTTManager rewritten (2.0.0).** Three faults made the old failure permanent:
+  - `publish()` errors were only printed. It now returns a bool, marks the link
+    dead on failure, and logs an event.
+  - `_handle_mqtt_error()` called `disconnect()`, which ran `wlan.active(False)`
+    — MQTT recovery switched off the WiFi radio. `_close()` now drops only the
+    MQTT socket and never touches the network interface.
+  - `connect_mqtt()` tested `client.is_connected()`, which `umqtt.simple` does
+    not implement, so recovery raised `AttributeError`. Connection state is now
+    tracked in `self.connected`.
+- **Non-blocking reconnect** via `ensure_connected()`, safe to call every loop,
+  with 5 s → 5 min exponential backoff. A broker that is down no longer blocks
+  the main loop or stops the device booting.
+- **Last will and testament**: retained `online` / `offline` on
+  `outdoor_sensor/BME280/status`, so the broker announces the device dropping
+  off. This is what makes external alerting possible.
+- **Periodic ping** every 10th cycle (~5 min) to catch a half-open socket that
+  still accepts writes.
+- **WiFi supervision** in the main loop, with reconnect and event logging. There
+  was previously none at all after boot.
+- **EventLog (my_hw 1.2.0)**: a 40-entry ring buffer of state changes only —
+  boot (with reset cause), WiFi up/down, MQTT up/down, publish resumed. Mirrored
+  to `events.json`, so it survives a reboot and can explain an unexplained one.
+- **Dashboard 1.3.0**: a status banner that goes amber/red when publishing
+  stalls, a Connection panel (WiFi + RSSI, MQTT state, last publish age,
+  ok/failed/reconnect counts), and a Recent events table.
+- **New endpoints** `/health` (JSON, with a single `healthy` boolean) and
+  `/events`, for Node-RED or any external watcher to poll.
+
+Note: alerting still needs something off-device. A device that is unpowered or
+wedged cannot report its own failure — use the last-will topic or poll `/health`.
+
 ### 1.6.0 — 2026-07-19
 - Device settings page (`/settings`): edit the watchdog (enable + timeout) and
   verbose logging from the browser. Saving writes config.json atomically and

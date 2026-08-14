@@ -1,4 +1,4 @@
-# @v 3.0.0 | 2026-07-19 | OTA updater over plain HTTP (via a LAN proxy, e.g. Node-RED)
+# @v 4.0.0 | 2026-08-15 | OTA over plain HTTP with compile check, backups and rollback
 try:
     import urequests as requests
 except ImportError:
@@ -10,8 +10,8 @@ import time
 import machine
 import gc
 
-__version__ = "3.0.0"
-__date__ = "2026-JUL-19"
+__version__ = "4.0.0"
+__date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
 
@@ -160,20 +160,56 @@ class OTAUpdater:
             self._cleanup(downloaded)
             return False
 
-        # 3) swap all in, then reboot
+        # 3) pre-flight: refuse to install code that cannot even compile.
+        # A syntax error in main.py is the most likely way to brick a device
+        # that is physically out of reach, and catching it here costs nothing
+        # while the working firmware is still in place.
+        for fn in downloaded:
+            if not fn.endswith(".py"):
+                continue
+            if feed:
+                feed()
+            try:
+                with open(fn + ".new") as f:
+                    src = f.read()
+                compile(src, fn, "exec")
+                src = None
+                gc.collect()
+            except Exception as e:
+                print("[OTA] %s failed to compile: %s - aborting, nothing changed" % (fn, e))
+                self._cleanup(downloaded)
+                return False
+        print("[OTA] all files compile")
+
+        # 4) back up the working firmware, then swap it out.
+        # boot.py restores these .bak files if the new build never runs cleanly.
         try:
             for fn in downloaded:
+                bak = fn + ".bak"
                 try:
-                    os.remove(fn)
+                    os.remove(bak)
                 except OSError:
                     pass
+                try:
+                    os.rename(fn, bak)
+                except OSError:
+                    pass          # no previous copy - nothing to keep
                 os.rename(fn + ".new", fn)
-            print("[OTA] updated to %s - rebooting" % remote)
-            time.sleep(1)
-            machine.reset()
         except Exception as e:
             print("[OTA] swap failed:", e)
             return False
+
+        # 5) mark the update as on trial. main.py clears this once it has
+        # actually published; boot.py rolls back if it never does.
+        try:
+            with open("ota_pending.json", "w") as f:
+                json.dump({"version": remote, "files": downloaded, "tries": 0}, f)
+        except Exception as e:
+            print("[OTA] could not write pending marker:", e)
+
+        print("[OTA] updated to %s (on trial) - rebooting" % remote)
+        time.sleep(1)
+        machine.reset()
         return True
 
     def _cleanup(self, files):

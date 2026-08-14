@@ -1,6 +1,6 @@
 {
-    "version": "1.6.0",
-    "updated": "2026-07-19",
+    "version": "1.7.0",
+    "updated": "2026-08-15",
     "_desc": "OTA manifest (bundle version + file list)",
     "files": [
         "main.py",

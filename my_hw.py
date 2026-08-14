@@ -1,4 +1,4 @@
-# @v 1.1.0 | 2026-07-19 | Hardware/WiFi/MQTT managers + TimeSync
+# @v 1.2.0 | 2026-08-15 | Hardware/WiFi/MQTT managers + TimeSync + EventLog
 from machine import Pin, SoftI2C, WDT
 import network
 import ubinascii
@@ -8,8 +8,8 @@ import machine
 import ntptime
 from umqtt.simple import MQTTClient
 
-__version__ = "1.1.0"
-__date__ = "2026-JUL-19"
+__version__ = "1.2.0"
+__date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
 VERBOSE = False  # set from config (logging.verbose) in main.py
@@ -252,55 +252,213 @@ class TimeSync:
         print(f"Date: {cls.DATE}")
         print(f"Author: {cls.AUTHOR}")
 
-class MQTTManager:
-    """Handles MQTT connections with config"""
-    VERSION = "1.3.1"
-    DATE = "2026-JAN-06"
+class EventLog:
+    """Small persistent ring buffer of notable events, shown on the dashboard.
+
+    Kept deliberately tiny: state changes only (boot, WiFi up/down, MQTT
+    up/down, OTA, sensor faults) - never per-reading noise. Survives a reboot
+    because it is mirrored to a JSON file, so after an unexpected restart the
+    device can still tell you what happened before it.
+    """
+    VERSION = "1.0.0"
+    DATE = "2026-AUG-15"
     AUTHOR = "Rick Jara"
 
-    def __init__(self, config_file="config.json"):
+    def __init__(self, path="events.json", limit=40):
+        self.path = path
+        self.limit = limit
+        self.clock = None          # a TimeSync, set once NTP has run
+        self.events = []
+        try:
+            with open(self.path) as f:
+                loaded = json.load(f)
+            if isinstance(loaded, list):
+                self.events = loaded[-self.limit:]
+        except Exception:
+            self.events = []
+
+    def set_clock(self, clock):
+        """Attach a TimeSync so later events carry real timestamps."""
+        self.clock = clock
+
+    def add(self, level, msg):
+        """Record an event. level is 'info', 'warn' or 'error'."""
+        ts = ""
+        try:
+            if self.clock:
+                ts = self.clock.timestamp()
+        except Exception:
+            pass
+        self.events.append({"ts": ts, "lvl": level, "msg": str(msg)[:80]})
+        if len(self.events) > self.limit:
+            self.events = self.events[-self.limit:]
+        print("[Event] %s %s %s" % (ts, level.upper(), msg))
+        self._save()
+
+    def _save(self):
+        try:
+            with open(self.path, "w") as f:
+                json.dump(self.events, f)
+        except Exception as e:
+            print("[EventLog] save failed: %s" % e)
+
+    def recent(self, n=12):
+        return self.events[-n:][::-1]      # newest first
+
+    def as_html(self, n=12):
+        """Rows for the dashboard table. Colour-coded by level."""
+        colour = {"error": "#f2777a", "warn": "#ffcc66", "info": "#9fb3c8"}
+        rows = []
+        for e in self.recent(n):
+            rows.append(
+                "<div><span style='color:%s'>%s</span><span>%s</span></div>"
+                % (colour.get(e.get("lvl"), "#9fb3c8"),
+                   e.get("msg", ""), e.get("ts", "") or "-")
+            )
+        return "".join(rows) if rows else "<div><span>no events recorded</span><span>-</span></div>"
+
+    @classmethod
+    def print_version(cls):
+        print(f"EventLog module version: {cls.VERSION}")
+        print(f"Date: {cls.DATE}")
+        print(f"Author: {cls.AUTHOR}")
+
+
+class MQTTManager:
+    """MQTT with non-blocking reconnect, health counters and a last will.
+
+    Rewritten in 2.0.0 after the device spent 20 days publishing into a dead
+    socket. Three faults caused that, all fixed here:
+
+      * publish() failures were only printed, so nothing ever noticed;
+      * the recovery path called disconnect(), which switched the WiFi radio
+        off - MQTT recovery must never touch the network interface;
+      * connect_mqtt() tested self.client.is_connected(), which umqtt.simple
+        does not implement, so recovery raised AttributeError instead.
+
+    The connection is now owned by ensure_connected(), which is safe to call
+    every loop: it returns immediately when healthy and applies an increasing
+    backoff when not, so a dead broker costs one cheap socket attempt every
+    few minutes rather than blocking the main loop.
+    """
+    VERSION = "2.0.0"
+    DATE = "2026-AUG-15"
+    AUTHOR = "Rick Jara"
+
+    BACKOFF_START_MS = 5000
+    BACKOFF_MAX_MS = 300000        # never wait longer than 5 minutes to retry
+
+    def __init__(self, config_file="config.json", events=None):
         """Initialize with configuration"""
         _dbg("[MQTTManager] init")
         self.config = ConfigManager.load_config(config_file)
-        self.wifi = self.config.get("wifi", {}).get("home_network", {})
         self.mqtt = self.config.get("mqtt", {})
-        self.static_ip = self.config.get("static_ip", {})
         self.client = None
+        self.connected = False
+        self.events = events
 
         self.client_id = (
             self.config.get("device", {}).get("hostname") or
             f"esp32_{ubinascii.hexlify(machine.unique_id()).decode()}"
         )
 
-    def connect_mqtt(self):
-        """Establish MQTT connection"""
-        if self.client and self.client.is_connected():
+        base = self.mqtt.get("base_topic", "outdoor_sensor/BME280")
+        self.status_topic = self.mqtt.get("status_topic", base + "/status")
+        self.keepalive = self.mqtt.get("keepalive", 60)
+
+        # Health counters - surfaced on the dashboard and /health.
+        self.publish_ok = 0
+        self.publish_fail = 0
+        self.reconnects = 0
+        self.last_ok_ms = None
+        self.last_error = ""
+        self._backoff_ms = self.BACKOFF_START_MS
+        self._next_try_ms = 0
+
+    def _log(self, level, msg):
+        if self.events:
+            self.events.add(level, msg)
+        else:
+            print("[MQTTManager] %s" % msg)
+
+    def connect_mqtt(self, raise_on_fail=True):
+        """Open the broker connection. Publishes a retained 'online' status.
+
+        The last will means the broker announces 'offline' on this same topic
+        if we vanish without saying goodbye - so a watcher can alert on the
+        device dropping off, which is exactly what was missing before.
+        """
+        if self.connected and self.client:
             _dbg("[MQTTManager] already connected")
-            return
+            return True
 
-        wifi_manager = WiFiManager()
-        if not wifi_manager.is_connected():
-            wifi_manager.connect()
+        self._close()
 
-        _dbg(f"[MQTTManager] connecting to {self.mqtt['server']}...")
-        self.client = MQTTClient(
-            client_id=self.client_id,
-            server=self.mqtt["server"],
-            port=self.mqtt.get("port", 1883),
-            user=self.mqtt.get("username"),
-            password=self.mqtt.get("password")
-        )
-
+        _dbg(f"[MQTTManager] connecting to {self.mqtt.get('server')}...")
         try:
+            self.client = MQTTClient(
+                client_id=self.client_id,
+                server=self.mqtt["server"],
+                port=self.mqtt.get("port", 1883),
+                user=self.mqtt.get("username"),
+                password=self.mqtt.get("password"),
+                keepalive=self.keepalive
+            )
+            self.client.set_last_will(self.status_topic.encode(), b"offline",
+                                      retain=True, qos=0)
             self.client.connect()
-            print(f"MQTT   : connected  {self.mqtt['server']}")
+            self.client.publish(self.status_topic.encode(), b"online",
+                                retain=True, qos=0)
+
+            self.connected = True
+            self.last_error = ""
+            self._backoff_ms = self.BACKOFF_START_MS
+            print(f"MQTT   : connected  {self.mqtt.get('server')}")
+            return True
+
         except Exception as e:
-            raise RuntimeError(f"[MQTTManager] Connection failed: {str(e)}")
+            self._close()
+            self.last_error = str(e)
+            if raise_on_fail:
+                raise RuntimeError(f"[MQTTManager] Connection failed: {str(e)}")
+            return False
+
+    def ensure_connected(self):
+        """Reconnect if needed, without blocking. Call this every loop.
+
+        Returns True when the link is believed good. On failure it schedules
+        the next attempt with exponential backoff instead of hammering a
+        broker that is down.
+        """
+        if self.connected and self.client:
+            return True
+
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._next_try_ms) < 0:
+            return False          # still inside the backoff window
+
+        ok = self.connect_mqtt(raise_on_fail=False)
+        if ok:
+            self.reconnects += 1
+            self._log("info", "MQTT reconnected to %s" % self.mqtt.get("server"))
+            return True
+
+        self._backoff_ms = min(self._backoff_ms * 2, self.BACKOFF_MAX_MS)
+        self._next_try_ms = time.ticks_add(time.ticks_ms(), self._backoff_ms)
+        self._log("warn", "MQTT reconnect failed (%s), retry in %ds"
+                  % (self.last_error, self._backoff_ms // 1000))
+        return False
 
     def publish(self, topic, message, retain=False, qos=0):
-        """Publish MQTT message with error handling"""
-        if not self.client:
-            raise RuntimeError("[MQTTManager] Not connected. Call connect_mqtt() first")
+        """Publish, returning True on success. Never raises, never blocks.
+
+        A failure marks the link dead so ensure_connected() rebuilds it on the
+        next loop - the old code left self.client in place and kept writing to
+        a socket the broker had long since closed.
+        """
+        if not self.ensure_connected():
+            self.publish_fail += 1
+            return False
 
         try:
             self.client.publish(
@@ -309,54 +467,96 @@ class MQTTManager:
                 retain=retain,
                 qos=qos
             )
+            self.publish_ok += 1
+            self.last_ok_ms = time.ticks_ms()
+            return True
+
         except Exception as e:
-            print(f"[MQTTManager] Publish failed: {str(e)}")
-            self._handle_mqtt_error()
+            self.publish_fail += 1
+            self.last_error = str(e)
+            was_connected = self.connected
+            self._close()
+            self._next_try_ms = time.ticks_add(time.ticks_ms(), self.BACKOFF_START_MS)
+            if was_connected:
+                self._log("error", "MQTT publish failed: %s" % e)
+            return False
+
+    def ping(self):
+        """Poke the broker to detect a half-open socket.
+
+        A TCP connection dropped by a router or a restarted broker can look
+        perfectly writable from this end. Publishing alone will not always
+        reveal that, so the main loop pings periodically.
+        """
+        if not (self.connected and self.client):
+            return False
+        try:
+            self.client.ping()
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            self._close()
+            self._log("error", "MQTT ping failed: %s" % e)
+            return False
 
     def subscribe(self, topic, callback, qos=0):
         """Subscribe to MQTT topic with callback"""
-        if not self.client:
-            raise RuntimeError("[MQTTManager] Not connected. Call connect_mqtt() first")
-
+        if not self.ensure_connected():
+            return False
         try:
             self.client.set_callback(callback)
             self.client.subscribe(topic.encode(), qos=qos)
             print(f"[MQTTManager] Subscribed to {topic}")
+            return True
         except Exception as e:
-            print(f"[MQTTManager] Subscribe failed: {str(e)}")
-            self._handle_mqtt_error()
+            self.last_error = str(e)
+            self._close()
+            self._log("error", "MQTT subscribe failed: %s" % e)
+            return False
 
     def check_messages(self):
         """Check for incoming MQTT messages"""
-        if self.client:
-            try:
-                self.client.check_msg()
-            except:
-                self._handle_mqtt_error()
+        if not (self.connected and self.client):
+            return
+        try:
+            self.client.check_msg()
+        except Exception as e:
+            self.last_error = str(e)
+            self._close()
+            self._log("error", "MQTT check_msg failed: %s" % e)
 
-    def _handle_mqtt_error(self):
-        """Attempt to reconnect on failure"""
-        print("[MQTTManager] MQTT error detected, reconnecting...")
-        self.disconnect()
-        time.sleep(1)
-        self.connect_mqtt()
+    def seconds_since_ok(self):
+        """Seconds since the last successful publish, or None if never."""
+        if self.last_ok_ms is None:
+            return None
+        return time.ticks_diff(time.ticks_ms(), self.last_ok_ms) // 1000
 
-    def disconnect(self):
-        """Cleanly disconnect MQTT and WiFi"""
+    def health(self):
+        """Machine-readable state, served at /health for external watchers."""
+        return {
+            "connected": self.connected,
+            "server": self.mqtt.get("server", ""),
+            "publish_ok": self.publish_ok,
+            "publish_fail": self.publish_fail,
+            "reconnects": self.reconnects,
+            "seconds_since_ok": self.seconds_since_ok(),
+            "last_error": self.last_error
+        }
+
+    def _close(self):
+        """Drop the client socket. Deliberately does NOT touch WiFi."""
         if self.client:
             try:
                 self.client.disconnect()
-            except:
+            except Exception:
                 pass
-            self.client = None
+        self.client = None
+        self.connected = False
 
-        wifi_manager = WiFiManager()
-        wifi_manager.wlan.active(False)
+    def disconnect(self):
+        """Cleanly disconnect MQTT only. WiFi is left alone."""
+        self._close()
         print("[MQTTManager] Disconnected")
-
-    def __del__(self):
-        """Cleanup when object is destroyed"""
-        self.disconnect()
 
     @classmethod
     def print_version(cls):
