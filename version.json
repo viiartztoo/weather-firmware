@@ -1,9 +1,12 @@
 {
-    "version": "1.6.1",
+    "version": "1.7.0",
     "updated": "2026-08-15",
-    "_desc": "OTA manifest - STAGE 1 of 2: safety net only (ota.py 4.0.0 + boot.py 2.0.0). Stage 2 restores the full bundle at 1.7.0.",
+    "_desc": "OTA manifest (bundle version + file list)",
     "files": [
+        "main.py",
+        "my_hw.py",
         "ota.py",
-        "boot.py"
+        "tools.py",
+        "dashboard.html"
     ]
 }
