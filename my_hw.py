@@ -1,4 +1,4 @@
-# @v 1.2.0 | 2026-08-15 | Hardware/WiFi/MQTT managers + TimeSync + EventLog
+# @v 1.2.1 | 2026-08-15 | Hardware/WiFi/MQTT managers + TimeSync + EventLog
 from machine import Pin, SoftI2C, WDT
 import network
 import ubinascii
@@ -8,7 +8,7 @@ import machine
 import ntptime
 from umqtt.simple import MQTTClient
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -305,17 +305,25 @@ class EventLog:
     def recent(self, n=12):
         return self.events[-n:][::-1]
 
-    def as_html(self, n=12):
-        """Rows for the dashboard table. Colour-coded by level."""
+    def rows_html(self, n=12):
+        """Yield one table row at a time so the caller can stream them.
+
+        Returning the joined block instead would allocate the whole table, and
+        this page has to work when the device is short of memory.
+        """
         colour = {"error": "#f2777a", "warn": "#ffcc66", "info": "#9fb3c8"}
-        rows = []
-        for e in self.recent(n):
-            rows.append(
-                "<div><span style='color:%s'>%s</span><span>%s</span></div>"
-                % (colour.get(e.get("lvl"), "#9fb3c8"),
-                   e.get("msg", ""), e.get("ts", "") or "-")
-            )
-        return "".join(rows) if rows else "<div><span>no events recorded</span><span>-</span></div>"
+        events = self.recent(n)
+        if not events:
+            yield "<div><span>no events recorded</span><span>-</span></div>"
+            return
+        for e in events:
+            yield ("<div><span style='color:%s'>%s</span><span>%s</span></div>"
+                   % (colour.get(e.get("lvl"), "#9fb3c8"),
+                      e.get("msg", ""), e.get("ts", "") or "-"))
+
+    def as_html(self, n=12):
+        """The whole table as one string. Prefer rows_html() where memory matters."""
+        return "".join(self.rows_html(n))
 
     @classmethod
     def print_version(cls):

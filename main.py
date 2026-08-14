@@ -1,4 +1,4 @@
-# @v 1.7.0 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+# @v 1.7.1 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -15,7 +15,7 @@ import gc
 import os
 import machine
 
-__version__ = "1.7.0"
+__version__ = "1.7.1"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -258,7 +258,21 @@ class WebServer:
                 pass
 
     def _serve_dashboard(self, conn):
-        """Fill the cached dashboard.html template with live values and send."""
+        """Stream dashboard.html, substituting {{TOKENS}} as we go.
+
+        The obvious implementation - a chain of html.replace() calls, then
+        encode the finished page - allocates a fresh copy of the whole document
+        on every step. At ~4 KB of template plus an event table that is roughly
+        seventeen copies per request, and on a heap this fragmented it raises
+        MemoryError mid-build. The handler then dies with nothing sent, which
+        the browser reports as ERR_EMPTY_RESPONSE.
+
+        Walking the template and sending each segment keeps peak allocation to
+        a few hundred bytes, so the page stays available precisely when the
+        device is short of memory - which is exactly when you want to look at
+        it. No Content-Length, so the response is delimited by Connection:
+        close.
+        """
         global latest_sensor_data, last_mqtt_payload, DASHBOARD_HTML
         d = latest_sensor_data
 
@@ -268,31 +282,54 @@ class WebServer:
             except (TypeError, ValueError):
                 return 0.0
 
-        html = DASHBOARD_HTML
-        html = html.replace("{{TEMP}}", "%.1f" % _f(d.get("temperature")))
-        html = html.replace("{{HUM}}", "%.1f" % _f(d.get("humidity")))
-        html = html.replace("{{PRES}}", "%.0f" % _f(d.get("pressure")))
-        html = html.replace("{{TS}}", str(d.get("timestamp", "")))
-        html = html.replace("{{UPTIME}}", str(d.get("uptime", "")))
-        html = html.replace("{{IP}}", str(d.get("ip_address", "")))
-        html = html.replace("{{HOST}}", str(d.get("hostname", "")))
-        html = html.replace("{{VER}}", __version__)
-        html = html.replace("{{RAW}}", last_mqtt_payload)
+        values = {
+            "TEMP": "%.1f" % _f(d.get("temperature")),
+            "HUM": "%.1f" % _f(d.get("humidity")),
+            "PRES": "%.0f" % _f(d.get("pressure")),
+            "TS": str(d.get("timestamp", "")),
+            "UPTIME": str(d.get("uptime", "")),
+            "IP": str(d.get("ip_address", "")),
+            "HOST": str(d.get("hostname", "")),
+            "VER": __version__,
+            "RAW": last_mqtt_payload,
+            "BANNER": _banner_html(),
+            "MQTT": _mqtt_state_text(),
+            "LASTPUB": _last_pub_text(),
+            "COUNTS": _counts_text(),
+            "WIFI": _wifi_text(),
+            "MEM": _mem_text(),
+        }
 
-        html = html.replace("{{BANNER}}", _banner_html())
-        html = html.replace("{{MQTT}}", _mqtt_state_text())
-        html = html.replace("{{LASTPUB}}", _last_pub_text())
-        html = html.replace("{{COUNTS}}", _counts_text())
-        html = html.replace("{{WIFI}}", _wifi_text())
-        html = html.replace("{{EVENTS}}", EVENTS.as_html(12) if EVENTS else "")
-        html = html.replace("{{MEM}}", _mem_text())
-
-        response = ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    "Content-Length: %d\r\nConnection: close\r\n\r\n%s") % (len(html), html)
         try:
-            conn.send(response.encode('utf-8'))
+            conn.send(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                      b"Connection: close\r\n\r\n")
+            tmpl = DASHBOARD_HTML
+            i = 0
+            while True:
+                j = tmpl.find("{{", i)
+                if j < 0:
+                    conn.send(tmpl[i:].encode('utf-8'))
+                    break
+                if j > i:
+                    conn.send(tmpl[i:j].encode('utf-8'))
+                k = tmpl.find("}}", j)
+                if k < 0:
+                    conn.send(tmpl[j:].encode('utf-8'))
+                    break
+                key = tmpl[j + 2:k]
+                if key == "EVENTS":
+
+                    if EVENTS:
+                        for row in EVENTS.rows_html(12):
+                            conn.send(row.encode('utf-8'))
+                else:
+                    val = values.get(key)
+                    if val:
+                        conn.send(str(val).encode('utf-8'))
+                i = k + 2
+                gc.collect()
         except Exception as e:
-            print(f"[WebServer] Error serving page: {e}")
+            print("[WebServer] Error serving page: %s" % e)
 
     def _serve_health(self, conn):
         """Machine-readable health, for Node-RED or any external watcher."""
