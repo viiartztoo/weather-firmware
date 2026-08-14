@@ -1,20 +1,4 @@
 # @v 2.0.0 | 2026-08-15 | Boot: network + WebREPL + OTA rollback (recovery path)
-#
-# This file is deliberately NOT in the OTA manifest, so an update can never
-# replace it. Everything here has to keep working even when main.py is broken,
-# because this is the only way back into a device that is physically out of
-# reach.
-#
-# Three jobs, in order of importance:
-#   1. Bring up WiFi and WebREPL BEFORE main.py runs. If main.py crashes or
-#      fails to import, the device still appears on the network and files can
-#      be repaired over WebREPL - no ladder required.
-#   2. Roll back a bad OTA update. ota.py leaves ota_pending.json behind after
-#      swapping files in; main.py deletes it once it has actually published.
-#      If we boot with it still present three times, the update never worked,
-#      so the .bak files are restored.
-#   3. Stay dependency-free. No my_hw, no umqtt - a broken module must not be
-#      able to take the recovery path down with it.
 
 import json
 import os
@@ -23,14 +7,12 @@ import time
 MAX_BOOT_TRIES = 3
 PENDING = "ota_pending.json"
 
-
 def _exists(path):
     try:
         os.stat(path)
         return True
     except OSError:
         return False
-
 
 def _connect_wifi():
     """Join the network using config.json, independent of my_hw."""
@@ -65,7 +47,6 @@ def _connect_wifi():
     except Exception as e:
         print("boot   : WiFi error %s" % e)
 
-
 def _rollback(files):
     """Restore the previous firmware from the .bak copies ota.py left."""
     restored = 0
@@ -81,7 +62,6 @@ def _rollback(files):
         except Exception as e:
             print("boot   : rollback of %s failed: %s" % (fn, e))
     print("boot   : ROLLED BACK %d file(s) to the previous firmware" % restored)
-
 
 def _check_ota():
     """Count boots since an update; roll back if it never came good."""
@@ -117,7 +97,6 @@ def _check_ota():
             json.dump(pending, f)
     except Exception as e:
         print("boot   : could not record boot attempt: %s" % e)
-
 
 try:
     _check_ota()

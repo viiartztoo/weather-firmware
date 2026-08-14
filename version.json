@@ -1,12 +1,8 @@
 {
-    "version": "1.7.0",
+    "version": "1.6.3",
     "updated": "2026-08-15",
-    "_desc": "OTA manifest (bundle version + file list)",
+    "_desc": "OTA manifest - STAGE 1c: streamed downloads (ota.py 4.1.0). Stage 2 restores the full bundle at 1.7.0.",
     "files": [
-        "main.py",
-        "my_hw.py",
-        "ota.py",
-        "tools.py",
-        "dashboard.html"
+        "ota.py"
     ]
 }

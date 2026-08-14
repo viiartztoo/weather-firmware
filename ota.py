@@ -1,4 +1,4 @@
-# @v 4.0.1 | 2026-08-15 | OTA over plain HTTP with compile check, backups and rollback
+# @v 4.1.0 | 2026-08-15 | OTA over plain HTTP: streamed download, compile check, backups, rollback
 try:
     import urequests as requests
 except ImportError:
@@ -10,10 +10,9 @@ import time
 import machine
 import gc
 
-__version__ = "4.0.1"
+__version__ = "4.1.0"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
-
 
 def _parse_version(v):
     parts = []
@@ -28,7 +27,6 @@ def _parse_version(v):
     while len(parts) < 3:
         parts.append(0)
     return tuple(parts[:3])
-
 
 class OTAUpdater:
     """Pulls firmware over plain HTTP from a LAN proxy (no on-device TLS).
@@ -54,15 +52,57 @@ class OTAUpdater:
         self.current_version = current_version
         self._last_check = 0
 
-    def _get(self, path, feed=None):
+    def _get(self, path, feed=None, headers=None):
         gc.collect()
         if feed:
             feed()
         url = self.base_url + path
+        kw = {}
+        if headers:
+            kw["headers"] = headers
         try:
-            return requests.get(url, timeout=self.timeout)
+            return requests.get(url, timeout=self.timeout, **kw)
         except TypeError:
-            return requests.get(url)
+            return requests.get(url, **kw)
+
+    def _download_to(self, path, dest, feed=None):
+        """Stream a file to flash in small chunks.
+
+        r.content allocates the whole body as one contiguous block. main.py is
+        ~36 KB and this chip's heap is fragmented, so that reliably fails while
+        a 9 KB file succeeds - which is exactly how the 1.7.0 update stalled.
+        Reading 512 bytes at a time keeps the peak allocation tiny regardless
+        of how large the firmware grows.
+
+        'Connection: close' is requested so the socket reaches EOF; the proxy
+        otherwise keeps it alive and the read would block until timeout.
+        """
+        r = self._get(path, feed, headers={"Connection": "close"})
+        if r.status_code != 200:
+            r.close()
+            raise RuntimeError("%s HTTP %s" % (path, r.status_code))
+
+        total = 0
+        try:
+            with open(dest, "wb") as f:
+                while True:
+                    if feed:
+                        feed()
+                    chunk = r.raw.read(512)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    total += len(chunk)
+        finally:
+            try:
+                r.close()
+            except Exception:
+                pass
+            gc.collect()
+
+        if total == 0:
+            raise RuntimeError("%s downloaded 0 bytes" % path)
+        return total
 
     def due(self):
         """True only for AUTO checks whose interval has elapsed."""
@@ -113,7 +153,7 @@ class OTAUpdater:
                     pass
 
     def _run(self, feed):
-        # 1) manifest
+
         try:
             r = self._get(self.manifest, feed)
             if r.status_code != 200:
@@ -137,7 +177,6 @@ class OTAUpdater:
             print("[OTA] manifest lists no files")
             return False
 
-        # 2) download each file to *.new (all-or-nothing)
         downloaded = []
         try:
             for fn in files:
@@ -145,15 +184,8 @@ class OTAUpdater:
                     feed()
                 gc.collect()
                 print("[OTA] downloading", fn)
-                r = self._get(fn, feed)
-                if r.status_code != 200:
-                    raise RuntimeError("%s HTTP %s" % (fn, r.status_code))
-                content = r.content
-                r.close()
-                with open(fn + ".new", "wb") as f:
-                    f.write(content)
-                content = None
-                gc.collect()
+                n = self._download_to(fn, fn + ".new", feed)
+                print("[OTA]   %s %d bytes" % (fn, n))
                 downloaded.append(fn)
         except Exception as e:
             print("[OTA] download failed:", e, "- aborting, no files changed")
@@ -161,16 +193,6 @@ class OTAUpdater:
             self._cleanup(downloaded)
             return False
 
-        # 3) pre-flight: refuse to install code that cannot even compile.
-        # A syntax error in main.py is the most likely way to brick a device
-        # that is physically out of reach, and catching it here costs nothing
-        # while the working firmware is still in place.
-        #
-        # Only a SyntaxError is fatal. Running out of heap compiling a 35 KB
-        # source, or a build without the compile() builtin, means "could not
-        # verify" - not "broken". Blocking the update in that case strands the
-        # device on old firmware for a fault that was never proven, so we warn
-        # and continue: the .bak backups and boot.py rollback still cover us.
         checked = skipped = 0
         for fn in downloaded:
             if not fn.endswith(".py"):
@@ -190,7 +212,7 @@ class OTAUpdater:
                 self._cleanup(downloaded)
                 return False
             except Exception as e:
-                # MemoryError, NameError (no compile builtin), anything else
+
                 print("[OTA] %s could not be verified (%s) - continuing" % (fn, e))
                 skipped += 1
             finally:
@@ -198,8 +220,6 @@ class OTAUpdater:
                 gc.collect()
         print("[OTA] pre-flight: %d verified, %d unverified" % (checked, skipped))
 
-        # 4) back up the working firmware, then swap it out.
-        # boot.py restores these .bak files if the new build never runs cleanly.
         try:
             for fn in downloaded:
                 bak = fn + ".bak"
@@ -210,14 +230,12 @@ class OTAUpdater:
                 try:
                     os.rename(fn, bak)
                 except OSError:
-                    pass          # no previous copy - nothing to keep
+                    pass
                 os.rename(fn + ".new", fn)
         except Exception as e:
             print("[OTA] swap failed:", e)
             return False
 
-        # 5) mark the update as on trial. main.py clears this once it has
-        # actually published; boot.py rolls back if it never does.
         try:
             with open("ota_pending.json", "w") as f:
                 json.dump({"version": remote, "files": downloaded, "tries": 0}, f)

@@ -19,8 +19,6 @@ __version__ = "1.7.0"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
-# A publish gap longer than this turns the dashboard banner red. Three missed
-# 30 s cycles - long enough to ignore a blip, short enough to catch a fault.
 STALE_AFTER_S = 120
 
 PRODUCTION = True
@@ -33,15 +31,15 @@ latest_sensor_data = {
     "uptime": ""
 }
 peak_time_active = False
-last_mqtt_payload = "{}"  # exact JSON string last published to MQTT
-DASHBOARD_HTML = ""       # dashboard.html loaded once at boot (template)
-ota_check_requested = False   # web asked to check for an update
-ota_apply_requested = False   # web asked to apply the pending update
-ota_status = None             # (ok, remote_version, available, error) from last check
-CONFIG = None                 # the loaded config dict (for the settings page)
-EVENTS = None                 # EventLog - state changes, survives a reboot
-MQTT = None                   # MQTTManager, so the web thread can read health
-WIFI = None                   # WiFiManager, same reason
+last_mqtt_payload = "{}"
+DASHBOARD_HTML = ""
+ota_check_requested = False
+ota_apply_requested = False
+ota_status = None
+CONFIG = None
+EVENTS = None
+MQTT = None
+WIFI = None
 
 def _mem_text():
     """Free heap, and the largest block that can actually be allocated.
@@ -59,7 +57,6 @@ def _mem_text():
     except Exception:
         return "unknown"
 
-
 def _read_ota_error():
     """The reason the last OTA attempt failed, if any. ota.py writes this to
     flash because the device has no serial console in the field."""
@@ -68,7 +65,6 @@ def _read_ota_error():
             return f.read()
     except Exception:
         return ""
-
 
 def _commit_ota():
     """Accept the running firmware and discard the rollback copies.
@@ -83,7 +79,7 @@ def _commit_ota():
         with open("ota_pending.json") as f:
             pending = json.load(f)
     except Exception:
-        return                      # nothing on trial - normal case
+        return
 
     for fn in pending.get("files", []):
         try:
@@ -100,7 +96,6 @@ def _commit_ota():
         EVENTS.add("info", msg)
     else:
         print("[OTA] %s" % msg)
-
 
 def _banner_html():
     """The one thing missing in 1.6.0: a page that admits when it is lying.
@@ -124,14 +119,12 @@ def _banner_html():
                 "data on the cloud dashboard is stale</div>" % secs)
     return "<div class='banner ok'>Publishing normally &mdash; last success %d s ago</div>" % secs
 
-
 def _mqtt_state_text():
     global MQTT
     if not MQTT:
         return "unknown"
     return ("connected to %s" % MQTT.mqtt.get("server", "?")) if MQTT.connected \
         else ("DISCONNECTED (%s)" % (MQTT.last_error or "no error recorded"))
-
 
 def _last_pub_text():
     global MQTT
@@ -146,14 +139,12 @@ def _last_pub_text():
         return "%d min ago" % (secs // 60)
     return "%d hours ago" % (secs // 3600)
 
-
 def _counts_text():
     global MQTT
     if not MQTT:
         return "-"
     return "%d ok / %d failed / %d reconnects" % (
         MQTT.publish_ok, MQTT.publish_fail, MQTT.reconnects)
-
 
 def _wifi_text():
     global WIFI
@@ -165,7 +156,6 @@ def _wifi_text():
         return "connected (RSSI %d dBm)" % WIFI.wlan.status('rssi')
     except Exception:
         return "connected"
-
 
 class WebServer:
     """Simple HTTP web server for serving webapp and sensor data"""
@@ -289,8 +279,6 @@ class WebServer:
         html = html.replace("{{VER}}", __version__)
         html = html.replace("{{RAW}}", last_mqtt_payload)
 
-        # Health block - the whole point of 1.7.0. Never show numbers without
-        # saying whether they are still arriving anywhere.
         html = html.replace("{{BANNER}}", _banner_html())
         html = html.replace("{{MQTT}}", _mqtt_state_text())
         html = html.replace("{{LASTPUB}}", _last_pub_text())
@@ -586,12 +574,10 @@ def main():
     PRODUCTION = config.get("watchdog", {}).get("enabled", True)
     wdt_timeout = config.get("watchdog", {}).get("timeout_ms", 40000)
 
-    # Verbose logging toggle - quiet by default, full detail when enabled.
     my_hw.VERBOSE = config.get("logging", {}).get("verbose", False)
 
     device_setup = DeviceSetup("ESP32")
 
-    # Event log first, so even a failure during startup gets recorded.
     global EVENTS, MQTT, WIFI
     EVENTS = EventLog(limit=config.get("logging", {}).get("event_limit", 40))
 
@@ -605,9 +591,6 @@ def main():
     else:
         color_printer.print_color("Time   : NOT synced - timestamps may be wrong", "yellow")
 
-    # Timestamps only become meaningful once NTP has run, so attach the clock
-    # here and log the boot with why we restarted - an unexplained reset is
-    # itself the thing worth knowing about.
     EVENTS.set_clock(time_sync)
     _causes = {1: "power on", 2: "hard reset", 3: "soft reset",
                4: "watchdog reset", 5: "deep sleep wake"}
@@ -619,8 +602,7 @@ def main():
 
     mqtt_manager = MQTTManager(events=EVENTS)
     MQTT = mqtt_manager
-    # Never let a broker that happens to be down stop the device booting - the
-    # main loop will keep retrying with backoff.
+
     if mqtt_manager.connect_mqtt(raise_on_fail=False):
         EVENTS.add("info", "MQTT connected to %s" % mqtt_manager.mqtt.get("server"))
     else:
@@ -659,7 +641,7 @@ def main():
     web_server = None
     ws_cfg = config.get("webserver", {})
     if ws_cfg.get("enabled", True):
-        # Load the dashboard template once (filled per request in _serve_dashboard).
+
         try:
             with open("dashboard.html") as f:
                 DASHBOARD_HTML = f.read()
@@ -682,8 +664,6 @@ def main():
 
     color_printer.print_color(f"Ready  : Outdoor Sensor v{__version__} ({__date__})", "blue")
 
-    # Startup self-test: one read + MQTT publish before the loop, so the chain
-    # is exercised immediately instead of waiting.
     try:
         _tC, _pPa, _hRH = sensor.values()
         _pres = _pPa / 100
@@ -711,8 +691,6 @@ def main():
     except Exception as e:
         color_printer.print_color(f"Read   : sensor error {e}", "yellow")
 
-    # Link-state trackers, so events are logged on transitions only and the
-    # log does not fill with one line per cycle.
     wifi_ok = True
     publish_ok_last = True
     cycle = 0
@@ -760,9 +738,6 @@ def main():
                 "version_date": __date__
             }
 
-            # --- keep the link alive -------------------------------------
-            # WiFi first: MQTT cannot recover over a dead network, and the old
-            # code had no supervision here at all.
             if not wifi_manager.is_connected():
                 if wifi_ok:
                     EVENTS.add("error", "WiFi lost - reconnecting")
@@ -771,7 +746,7 @@ def main():
                     wifi_manager.connect()
                     wifi_ok = True
                     EVENTS.add("info", "WiFi reconnected as %s" % wifi_manager.get_ip())
-                    mqtt_manager.disconnect()   # force a fresh socket on the new link
+                    mqtt_manager.disconnect()
                 except Exception as e:
                     color_printer.print_color(f"WiFi reconnect failed: {e}", "red")
             elif not wifi_ok:
@@ -784,16 +759,13 @@ def main():
                 if not publish_ok_last:
                     EVENTS.add("info", "Publishing resumed")
                 publish_ok_last = True
-                # First proof the whole chain works on this build - safe to
-                # throw away the rollback copies now.
+
                 _commit_ota()
             else:
                 if publish_ok_last:
                     color_printer.print_color("MQTT   : publish failed", "red")
                 publish_ok_last = False
 
-            # A half-open socket can accept writes forever without reaching the
-            # broker. Ping every 10th cycle (~5 min) so that gets noticed.
             cycle += 1
             if cycle % 10 == 0 and mqtt_manager.connected:
                 mqtt_manager.ping()
@@ -802,7 +774,6 @@ def main():
             _pause = web_server.pause if web_server else None
             _resume = web_server.resume if web_server else None
 
-            # OTA check (manual): fetch manifest only, store result for the page.
             try:
                 if ota_check_requested:
                     ota_check_requested = False
@@ -823,7 +794,6 @@ def main():
             except Exception as e:
                 color_printer.print_color(f"OTA check error: {e}", "red")
 
-            # OTA apply: manual "Update now" button, or automatic scheduled update.
             try:
                 if ota_apply_requested or ota_updater.due():
                     ota_apply_requested = False
@@ -847,7 +817,6 @@ def main():
 
             gc.collect()
 
-            # Sleep in 1s chunks so a manual OTA request is picked up quickly.
             for _ in range(30):
                 if ota_check_requested or ota_apply_requested:
                     break
@@ -867,10 +836,7 @@ def main():
                 heartbeat.feed()
             sleep_ms(5000)
 if __name__ == "__main__":
-    # A crash here would otherwise drop to the REPL and sit there silently -
-    # invisible from outside, and on a device that is out of reach that means a
-    # trip up the ladder. Rebooting instead keeps the device trying, and lets
-    # boot.py count failed boots so a bad update rolls itself back.
+
     try:
         main()
     except KeyboardInterrupt:

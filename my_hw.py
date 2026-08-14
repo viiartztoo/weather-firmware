@@ -12,7 +12,7 @@ __version__ = "1.2.0"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
-VERBOSE = False  # set from config (logging.verbose) in main.py
+VERBOSE = False
 
 def _dbg(*args):
     """Print only in verbose mode - keeps normal boot output clean."""
@@ -267,7 +267,7 @@ class EventLog:
     def __init__(self, path="events.json", limit=40):
         self.path = path
         self.limit = limit
-        self.clock = None          # a TimeSync, set once NTP has run
+        self.clock = None
         self.events = []
         try:
             with open(self.path) as f:
@@ -303,7 +303,7 @@ class EventLog:
             print("[EventLog] save failed: %s" % e)
 
     def recent(self, n=12):
-        return self.events[-n:][::-1]      # newest first
+        return self.events[-n:][::-1]
 
     def as_html(self, n=12):
         """Rows for the dashboard table. Colour-coded by level."""
@@ -322,7 +322,6 @@ class EventLog:
         print(f"EventLog module version: {cls.VERSION}")
         print(f"Date: {cls.DATE}")
         print(f"Author: {cls.AUTHOR}")
-
 
 class MQTTManager:
     """MQTT with non-blocking reconnect, health counters and a last will.
@@ -346,7 +345,7 @@ class MQTTManager:
     AUTHOR = "Rick Jara"
 
     BACKOFF_START_MS = 5000
-    BACKOFF_MAX_MS = 300000        # never wait longer than 5 minutes to retry
+    BACKOFF_MAX_MS = 300000
 
     def __init__(self, config_file="config.json", events=None):
         """Initialize with configuration"""
@@ -366,7 +365,6 @@ class MQTTManager:
         self.status_topic = self.mqtt.get("status_topic", base + "/status")
         self.keepalive = self.mqtt.get("keepalive", 60)
 
-        # Health counters - surfaced on the dashboard and /health.
         self.publish_ok = 0
         self.publish_fail = 0
         self.reconnects = 0
@@ -435,7 +433,7 @@ class MQTTManager:
 
         now = time.ticks_ms()
         if time.ticks_diff(now, self._next_try_ms) < 0:
-            return False          # still inside the backoff window
+            return False
 
         ok = self.connect_mqtt(raise_on_fail=False)
         if ok:
