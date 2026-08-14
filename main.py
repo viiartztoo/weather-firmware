@@ -43,6 +43,16 @@ EVENTS = None                 # EventLog - state changes, survives a reboot
 MQTT = None                   # MQTTManager, so the web thread can read health
 WIFI = None                   # WiFiManager, same reason
 
+def _read_ota_error():
+    """The reason the last OTA attempt failed, if any. ota.py writes this to
+    flash because the device has no serial console in the field."""
+    try:
+        with open("ota_error.txt") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
 def _commit_ota():
     """Accept the running firmware and discard the rollback copies.
 
@@ -289,7 +299,8 @@ class WebServer:
             "wifi_connected": bool(WIFI and WIFI.is_connected()),
             "ip_address": latest_sensor_data.get("ip_address", ""),
             "stale_after_s": STALE_AFTER_S,
-            "mqtt": MQTT.health() if MQTT else {}
+            "mqtt": MQTT.health() if MQTT else {},
+            "last_ota_error": _read_ota_error()
         }
         secs = payload["mqtt"].get("seconds_since_ok") if payload["mqtt"] else None
         payload["healthy"] = bool(

@@ -1,4 +1,4 @@
-# @v 4.0.0 | 2026-08-15 | OTA over plain HTTP with compile check, backups and rollback
+# @v 4.0.1 | 2026-08-15 | OTA over plain HTTP with compile check, backups and rollback
 try:
     import urequests as requests
 except ImportError:
@@ -10,7 +10,7 @@ import time
 import machine
 import gc
 
-__version__ = "4.0.0"
+__version__ = "4.0.1"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -157,6 +157,7 @@ class OTAUpdater:
                 downloaded.append(fn)
         except Exception as e:
             print("[OTA] download failed:", e, "- aborting, no files changed")
+            self._write_error("download failed: %s" % e)
             self._cleanup(downloaded)
             return False
 
@@ -164,22 +165,38 @@ class OTAUpdater:
         # A syntax error in main.py is the most likely way to brick a device
         # that is physically out of reach, and catching it here costs nothing
         # while the working firmware is still in place.
+        #
+        # Only a SyntaxError is fatal. Running out of heap compiling a 35 KB
+        # source, or a build without the compile() builtin, means "could not
+        # verify" - not "broken". Blocking the update in that case strands the
+        # device on old firmware for a fault that was never proven, so we warn
+        # and continue: the .bak backups and boot.py rollback still cover us.
+        checked = skipped = 0
         for fn in downloaded:
             if not fn.endswith(".py"):
                 continue
             if feed:
                 feed()
+            gc.collect()
+            src = None
             try:
                 with open(fn + ".new") as f:
                     src = f.read()
                 compile(src, fn, "exec")
-                src = None
-                gc.collect()
-            except Exception as e:
-                print("[OTA] %s failed to compile: %s - aborting, nothing changed" % (fn, e))
+                checked += 1
+            except SyntaxError as e:
+                print("[OTA] %s has a syntax error: %s - aborting, nothing changed" % (fn, e))
+                self._write_error("%s syntax error: %s" % (fn, e))
                 self._cleanup(downloaded)
                 return False
-        print("[OTA] all files compile")
+            except Exception as e:
+                # MemoryError, NameError (no compile builtin), anything else
+                print("[OTA] %s could not be verified (%s) - continuing" % (fn, e))
+                skipped += 1
+            finally:
+                src = None
+                gc.collect()
+        print("[OTA] pre-flight: %d verified, %d unverified" % (checked, skipped))
 
         # 4) back up the working firmware, then swap it out.
         # boot.py restores these .bak files if the new build never runs cleanly.
@@ -211,6 +228,16 @@ class OTAUpdater:
         time.sleep(1)
         machine.reset()
         return True
+
+    def _write_error(self, msg):
+        """Leave the reason on flash - the device has no serial console in the
+        field, so a failed update must be able to explain itself afterwards.
+        Served by /health from firmware 1.7.0 onwards."""
+        try:
+            with open("ota_error.txt", "w") as f:
+                f.write(str(msg)[:200])
+        except Exception:
+            pass
 
     def _cleanup(self, files):
         for fn in files:
