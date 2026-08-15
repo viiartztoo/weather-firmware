@@ -1,4 +1,4 @@
-# @v 1.7.7 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+# @v 1.7.8 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -15,7 +15,7 @@ import gc
 import os
 import machine
 
-__version__ = "1.7.7"
+__version__ = "1.7.8"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
