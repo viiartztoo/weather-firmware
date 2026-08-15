@@ -1,9 +1,11 @@
 {
-    "version": "1.7.3",
+    "version": "1.7.4",
     "updated": "2026-08-15",
     "_desc": "OTA manifest (bundle version + file list)",
     "files": [
         "main.py",
+        "ota.py",
+        "tools.py",
         "dashboard.html"
     ]
 }

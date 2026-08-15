@@ -1,4 +1,4 @@
-# @v 4.1.0 | 2026-08-15 | OTA over plain HTTP: streamed download, compile check, backups, rollback
+# @v 4.2.0 | 2026-08-15 | OTA over plain HTTP: streamed download, compile check, backups, rollback
 try:
     import urequests as requests
 except ImportError:
@@ -10,7 +10,7 @@ import time
 import machine
 import gc
 
-__version__ = "4.1.0"
+__version__ = "4.2.0"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -242,9 +242,14 @@ class OTAUpdater:
         except Exception as e:
             print("[OTA] could not write pending marker:", e)
 
-        print("[OTA] updated to %s (on trial) - rebooting" % remote)
+        try:
+            os.remove("file_state.txt")
+        except OSError:
+            pass
+
+        print("[OTA] updated to %s (on trial) - restarting via deep sleep" % remote)
         time.sleep(1)
-        machine.reset()
+        machine.deepsleep(500)
         return True
 
     def _write_error(self, msg):

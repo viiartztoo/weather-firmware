@@ -1,6 +1,15 @@
-# @v 1.1.0 | 2026-07-19 | Local file-change reboot check
+# @v 1.2.0 | 2026-08-15 | Local file-change reboot check
 import machine
 import os
+
+def _ota_in_progress():
+    """True while an update is on trial. main.py changing is expected then,
+    so rebooting over it just wastes one of the three trial boots."""
+    try:
+        os.stat("ota_pending.json")
+        return True
+    except OSError:
+        return False
 
 def file_change_check():
     """
@@ -43,12 +52,15 @@ def file_change_check():
                 print(f"  Size: {saved_size} -> {current_size}")
                 if saved_mtime > 0 and current_mtime > 0:
                     print(f"  MTime: {saved_mtime} -> {current_mtime}")
-                print("[FileCheck] Saving new state and rebooting...")
-
                 with open(state_file, "w") as f:
                     f.write(f"{current_size}\n{current_mtime}\n")
 
-                machine.reset()
+                if _ota_in_progress():
+                    print("[FileCheck] change is an OTA on trial - not rebooting")
+                    return True
+
+                print("[FileCheck] Saving new state and restarting...")
+                machine.deepsleep(500)
                 return False
             else:
 
