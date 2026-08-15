@@ -1,4 +1,4 @@
-# @v 1.7.4 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+# @v 1.7.5 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -15,7 +15,7 @@ import gc
 import os
 import machine
 
-__version__ = "1.7.4"
+__version__ = "1.7.5"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -529,7 +529,7 @@ class WebServer:
             if self._save_config():
                 self._send_html(conn, self._notice("Saved", "Settings written. Rebooting to apply...", reboot=True))
                 time.sleep(1)
-                machine.reset()
+                machine.deepsleep(500)
             else:
                 self._send_html(conn, self._notice("Error", "Could not write config.json - no changes applied.", reboot=False))
             return
@@ -564,7 +564,7 @@ class WebServer:
     def _handle_reboot(self, conn):
         self._send_html(conn, self._notice("Rebooting", "The device is rebooting. Reconnect in ~30 s.", reboot=True))
         time.sleep(1)
-        machine.reset()
+        machine.deepsleep(500)
 
     def _serve_json(self, conn):
         """Serve JSON sensor data for /update endpoint"""
@@ -965,4 +965,4 @@ if __name__ == "__main__":
             pass
         print("rebooting in 10 s")
         time.sleep(10)
-        machine.reset()
+        machine.deepsleep(500)
