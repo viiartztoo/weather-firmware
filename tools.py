@@ -1,4 +1,4 @@
-# @v 1.2.0 | 2026-08-15 | Local file-change reboot check
+# @v 1.3.0 | 2026-08-15 | Local file-change reboot check
 import machine
 import os
 
@@ -56,12 +56,10 @@ def file_change_check():
                     f.write(f"{current_size}\n{current_mtime}\n")
 
                 if _ota_in_progress():
-                    print("[FileCheck] change is an OTA on trial - not rebooting")
-                    return True
-
-                print("[FileCheck] Saving new state and restarting...")
-                machine.deepsleep(500)
-                return False
+                    print("[FileCheck] change is an OTA on trial - continuing")
+                else:
+                    print("[FileCheck] main.py changed - state saved, continuing")
+                return True
             else:
 
                 return True

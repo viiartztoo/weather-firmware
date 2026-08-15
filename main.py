@@ -1,4 +1,4 @@
-# @v 1.7.5 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+# @v 1.7.7 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -15,7 +15,7 @@ import gc
 import os
 import machine
 
-__version__ = "1.7.5"
+__version__ = "1.7.7"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -359,8 +359,16 @@ class WebServer:
                 if key == "EVENTS":
 
                     if EVENTS:
-                        for row in EVENTS.rows_html(12):
+                        total = len(EVENTS.recent(20))
+                        extra = total - 5 if total > 5 else 0
+                        for i, row in enumerate(EVENTS.rows_html(20)):
+                            if i == 5 and extra:
+                                conn.send(("<details><summary>%d older event%s"
+                                           "</summary>" % (extra, "" if extra == 1 else "s")
+                                           ).encode('utf-8'))
                             conn.send(row.encode('utf-8'))
+                        if extra:
+                            conn.send(b"</details>")
                 else:
                     val = values.get(key)
                     if val:
@@ -527,9 +535,13 @@ class WebServer:
                 pass
             CONFIG.setdefault("logging", {})["verbose"] = ("verbose" in params)
             if self._save_config():
-                self._send_html(conn, self._notice("Saved", "Settings written. Rebooting to apply...", reboot=True))
-                time.sleep(1)
-                machine.deepsleep(500)
+
+                self._send_html(conn, self._notice(
+                    "Saved",
+                    "Settings written to config.json. They take effect at the "
+                    "next <b>power cycle</b> - this board does not come back "
+                    "cleanly from a software restart, so it is not rebooting "
+                    "itself.", reboot=False))
             else:
                 self._send_html(conn, self._notice("Error", "Could not write config.json - no changes applied.", reboot=False))
             return
@@ -551,6 +563,10 @@ class WebServer:
             "<form method='get' action='/settings'>"
             "<input type='hidden' name='apply' value='1'>"
             "<label><input type='checkbox' name='wd' %s> Watchdog enabled</label>"
+            "<p style='font-size:.75rem;color:#d29922;margin:-6px 0 4px'>Leave off on "
+            "this board. Only a physical power cycle brings the network stack up "
+            "cleanly, so a watchdog reset turns a hang into an unrecoverable "
+            "boot loop.</p>"
             "<label>Watchdog timeout (ms): <input type='number' name='to' value='%s'></label>"
             "<label><input type='checkbox' name='verbose' %s> Verbose logging</label>"
             "<button type='submit'>Save &amp; reboot</button></form>"
@@ -562,7 +578,12 @@ class WebServer:
         self._send_html(conn, body)
 
     def _handle_reboot(self, conn):
-        self._send_html(conn, self._notice("Rebooting", "The device is rebooting. Reconnect in ~30 s.", reboot=True))
+
+        self._send_html(conn, self._notice(
+            "Restarting",
+            "Restarting now. <b>Warning:</b> this board often comes back with a "
+            "broken network stack after a software restart and may need a "
+            "physical power cycle. Reconnect in ~30 s.", reboot=True))
         time.sleep(1)
         machine.deepsleep(500)
 
@@ -735,7 +756,10 @@ def main():
     if PRODUCTION:
         heartbeat = Heartbeat(timeout=wdt_timeout)
         heartbeat.start()
-        color_printer.print_color(f"WDT    : enabled ({wdt_timeout} ms)", "green")
+        color_printer.print_color(f"WDT    : enabled ({wdt_timeout} ms)", "yellow")
+        color_printer.print_color(
+            "WDT    : WARNING - a watchdog reset on this board returns with a "
+            "broken network stack and loops. Recommend disabling.", "red")
 
     else:
         color_printer.print_color("WDT    : disabled (dev/debug)", "yellow")
@@ -963,6 +987,8 @@ if __name__ == "__main__":
                 json.dump(_ev[-40:], f)
         except Exception:
             pass
-        print("rebooting in 10 s")
-        time.sleep(10)
-        machine.deepsleep(500)
+
+        print("HALTED - not restarting (a software restart would come back with"
+              " a broken network stack).")
+        print("The device stays on the network: WebREPL on port 8266, and the"
+              " dashboard if it was up. Power cycle to recover.")
