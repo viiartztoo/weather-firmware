@@ -1,9 +1,10 @@
 {
-    "_version": "1.6.0",
-    "_updated": "2026-07-19",
+    "_version": "2.0.0",
+    "_updated": "2026-08-15",
     "_desc": "Device + network + feature settings (copy to config.json, fill secrets)",
     "device": {
-        "hostname": "esp32-bme280"
+        "hostname": "esp32-bme280",
+        "board": "ESP32"
     },
     "wifi": {
         "home_network": {

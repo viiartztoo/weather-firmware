@@ -1,22 +1,24 @@
 Outdoor Sensor Firmware - File Manifest
-Bundle version : 1.6.0   (from main.py @v tag)
-Generated      : 2026-07-19 07:05 UTC   by gen_manifest.py
-Files          : 13
+Bundle version : 2.0.0   (from main.py @v tag)
+Generated      : 2026-08-15 07:52 UTC   by gen_manifest.py
+Files          : 15
 
 File                 Type    Version  Updated             Description
 ---------------------------------------------------------------------
+HANDOVER.md          other   -        -                   -
 PiicoDev_BME280.py   module  1.0.0    2021-03 (vendored)  BME280 atmospheric sensor driver (Core Electronics)
 PiicoDev_Unified.py  module  1.1.0    2023-05 (vendored)  PiicoDev unified I2C driver (Core Electronics)
-boot.py              module  1.0.0    2026-07-19          Boot + WebREPL start
-config.example.json  config  1.6.0    2026-07-19          Device + network + feature settings (copy to config.json, fill secrets)
-config.json          config  1.6.0    2026-07-19          Device + network + feature settings
-dashboard.html       web     1.2.1    2026-07-19          Onboard status page template ({{TOKENS}} filled at boot)
+app.py               module  2.0.0    2026-08-15          Application: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+boot.py              module  2.0.0    2026-08-15          Boot: network + WebREPL + OTA rollback (recovery path)
+config.example.json  config  2.0.0    2026-08-15          Device + network + feature settings (copy to config.json, fill secrets)
+config.json          config  2.0.0    2026-08-15          Device + network + feature settings
+dashboard.html       web     1.5.1    2026-08-15          Onboard status page template ({{TOKENS}} filled per request)
 file_state.txt       data    -        -                   -
-main.py              module  1.6.0    2026-07-19          App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
-my_hw.py             module  1.1.0    2026-07-19          Hardware/WiFi/MQTT managers + TimeSync
-ota.py               module  3.0.0    2026-07-19          OTA updater over plain HTTP (via a LAN proxy, e.g. Node-RED)
-tools.py             module  1.1.0    2026-07-19          Local file-change reboot check
-version.json         config  1.6.0    2026-07-19          OTA manifest (bundle version + file list)
+main.py              module  2.0.0    2026-08-15          Boot stub - MicroPython runs main.py, the app lives in app.mpy
+my_hw.py             module  1.3.0    2026-08-15          Hardware/WiFi/MQTT managers + TimeSync + EventLog
+ota.py               module  4.2.0    2026-08-15          OTA over plain HTTP: streamed download, compile check, backups, rollback
+tools.py             module  1.3.0    2026-08-15          Local file-change reboot check
+version.json         config  2.0.0    2026-08-15          OTA manifest (bundle version + file list). Bytecode bundle - see note.
 webrepl_cfg.py       module  1.0.0    2026-07-19          WebREPL password
 
 Per-file shorthand:  # @v <version> | <date> | <description>

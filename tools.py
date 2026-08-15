@@ -2,6 +2,8 @@
 import machine
 import os
 
+__version__ = "1.3.0"
+
 def _ota_in_progress():
     """True while an update is on trial. main.py changing is expected then,
     so rebooting over it just wastes one of the three trial boots."""

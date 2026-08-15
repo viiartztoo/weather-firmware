@@ -6,6 +6,40 @@ are kept in code as `__version__` / `VERSION` and listed in `MANIFEST.txt`
 
 ## Bundle history
 
+### 2.0.0 — 2026-08-15
+The firmware now ships as **precompiled bytecode**, and that is what finally
+fixed a day of failures blamed on two different boards.
+
+**Root cause.** Source is parsed into RAM at import. The application had grown
+to ~91 KB of source across six modules, and that footprint starved the pools
+FreeRTOS and lwIP allocate from — so `_thread.start_new_thread()` failed with
+"can't create thread" at *any* stack size down to 3 KB, and every outbound TCP
+connect returned `-203` while UDP and DNS kept working. `gc.mem_free()` still
+reported ~72 KB free, which is why it read as a hardware fault for hours.
+
+It was measured conclusively by testing the same board bare: threads and TCP
+worked perfectly with nothing loaded, and failed the moment the firmware was
+imported. Both boards were healthy the whole time.
+
+- **Bytecode bundle**: 91,460 bytes of source → 37,996 bytes of `.mpy`, 58%
+  smaller. Compile with `mpy-cross==1.28.0.post2` (must match MicroPython
+  1.28.0's bytecode version).
+- **`main.py` is now a 138-byte stub** that imports `app`. MicroPython must run
+  a real `.py` at boot, so the application moved to `app.py` → `app.mpy`.
+- **No threads.** The web server's accept loop moved into the main loop as
+  `poll()`, called ~10x/second between readings. Threads were the single
+  largest allocation and the first thing to fail.
+- **Per-file versions reported at runtime**: a `Modules:` line at boot listing
+  app, my_hw, ota, tools, dashboard and the stub, and the same set served under
+  `versions` on `/health`. `tools.py` gained the `__version__` it was missing.
+- `version.json` corrected to match `main.py` — `gen_manifest.py` caught that
+  they had drifted (1.7.0 vs 2.0.0).
+
+**Known gap:** OTA of `.mpy` files is untested. The Node-RED proxy fetches from
+the GitHub contents API and binary payloads may need base64 handling. Verify a
+downloaded file byte-for-byte before trusting OTA again. The manifest is pinned
+at 2.0.0 — the same as the device — so nothing is offered until bumped.
+
 ### 1.7.0 — 2026-08-15
 Fixes a 20-day silent outage: the device stayed up, read the sensor, served its
 web page and looked healthy while publishing into a dead socket. Nothing on the

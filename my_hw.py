@@ -1,4 +1,4 @@
-# @v 1.2.1 | 2026-08-15 | Hardware/WiFi/MQTT managers + TimeSync + EventLog
+# @v 1.3.0 | 2026-08-15 | Hardware/WiFi/MQTT managers + TimeSync + EventLog
 from machine import Pin, SoftI2C, WDT
 import network
 import ubinascii
@@ -8,7 +8,7 @@ import machine
 import ntptime
 from umqtt.simple import MQTTClient
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -51,6 +51,7 @@ class DeviceSetup:
     AUTHOR = "Rick Jara"
 
     SUPPORTED_DEVICES = {
+        "ESP32-S3": {"led": 48, "scl": 9, "sda": 8},
         "ESP32-S2": {"led": 15, "scl": 39, "sda": 37},
         "ESP32": {"led": 2, "scl": 22, "sda": 21},
         "ESP8266": {"led": 2, "scl": 4, "sda": 5}
