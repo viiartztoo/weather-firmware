@@ -1,5 +1,5 @@
 {
-    "version": "2.0.0",
+    "version": "2.0.2",
     "updated": "2026-08-15",
     "_desc": "OTA manifest (bundle version + file list). Bytecode bundle - see note.",
     "_note": "The device now runs .mpy bytecode. OTA of .mpy files is UNTESTED: the Node-RED proxy fetches from the GitHub contents API, and binary payloads may need base64 handling. Verify a download byte-for-byte before relying on OTA. Set to 2.0.0 (same as the device) so nothing is offered until deliberately bumped.",

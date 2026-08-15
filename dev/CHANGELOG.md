@@ -6,6 +6,19 @@ are kept in code as `__version__` / `VERSION` and listed in `MANIFEST.txt`
 
 ## Bundle history
 
+### 2.0.2 — 2026-08-15
+Two bugs found by running the bytecode build on real hardware.
+
+- **Leaked listening socket.** If anything failed after `bind()`, `start()`
+  closed `self.socket` - still `None` at that point - so the bound socket
+  leaked and held port 80. Every retry then failed `EADDRINUSE` forever, which
+  read as "the web server is broken". It now closes the local socket, and uses
+  `setblocking(False)` rather than `settimeout(0)`.
+- **`_versions()` restarted the application.** It did `import main` to read the
+  stub's version, but `main.py` calls `app.run()` - so importing it ran the
+  whole app a second time, and the second instance could not bind port 80. The
+  stub version is now read from the file as text.
+
 ### 2.0.0 — 2026-08-15
 The firmware now ships as **precompiled bytecode**, and that is what finally
 fixed a day of failures blamed on two different boards.

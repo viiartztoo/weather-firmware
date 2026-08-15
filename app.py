@@ -1,4 +1,4 @@
-# @v 2.0.0 | 2026-08-15 | Application: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+# @v 2.0.2 | 2026-08-15 | Application: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -15,7 +15,7 @@ import gc
 import os
 import machine
 
-__version__ = "2.0.0"
+__version__ = "2.0.2"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -50,9 +50,10 @@ def _versions():
     __version__; this collects them at runtime. Printed at boot and served on
     /health, so 'which build is on the wall?' never needs a guess.
     """
+
     try:
-        import main
-        stub = main.__version__
+        with open("main.py") as f:
+            stub = f.read(160).split("@v ")[1].split(" ")[0]
     except Exception:
         stub = "?"
     return {
@@ -227,22 +228,24 @@ class WebServer:
         is called roughly ten times a second during the sleep between readings,
         so pages load promptly and there is no thread to fail.
         """
+        s = None
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(('0.0.0.0', self.port))
             s.listen(5)
-            s.settimeout(0)
+            s.setblocking(False)
             self.socket = s
             self.running = True
             return True
         except Exception as e:
+
             print("[WebServer] Failed to start: %s" % e)
-            try:
-                if self.socket:
-                    self.socket.close()
-            except Exception:
-                pass
+            if s is not None:
+                try:
+                    s.close()
+                except Exception:
+                    pass
             self.socket = None
             self.running = False
             return False
