@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- @v 1.3.0 | 2026-08-15 | Onboard status page template ({{TOKENS}} filled per request) -->
+<!-- @v 1.4.0 | 2026-08-15 | Onboard status page template ({{TOKENS}} filled per request) -->
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="30">
@@ -19,10 +19,11 @@ h1{margin:0;font-size:1.3rem}
 h2{font-size:.75rem;color:#7d93a8;text-transform:uppercase;letter-spacing:.05em;margin:18px 0 6px}
 pre{background:#0b1118;border:1px solid #26333f;border-radius:10px;padding:12px;overflow:auto;color:#9ae6b4;font-size:.8rem;white-space:pre-wrap;word-break:break-all;}
 a{color:#7d93a8}
-.banner{max-width:520px;margin:4px auto 10px;padding:10px 14px;border-radius:10px;font-size:.85rem;text-align:center;border:1px solid}
-.banner.ok{background:#12261c;border-color:#1f5c3a;color:#8fd9ab}
-.banner.warn{background:#2a2413;border-color:#6b5a1e;color:#ffcc66}
-.banner.err{background:#2a1518;border-color:#6e2a30;color:#f2777a}
+.status{display:flex;align-items:center;gap:11px;max-width:520px;margin:4px auto 12px;padding:0 16px;font-size:.85rem;color:#9fb3c8}
+.led{width:13px;height:13px;border-radius:50%;flex:0 0 13px}
+.led.ok{background:#3fb950;box-shadow:0 0 9px 1px rgba(63,185,80,.55)}
+.led.warn{background:#d29922;box-shadow:0 0 9px 1px rgba(210,153,34,.55)}
+.led.err{background:#f85149;box-shadow:0 0 9px 1px rgba(248,81,73,.6)}
 .log div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #26333f;padding:4px 0;font-size:.78rem;color:#9fb3c8}
 .log div span:last-child{color:#5f7286;white-space:nowrap}
 </style></head><body>

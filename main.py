@@ -1,4 +1,4 @@
-# @v 1.7.2 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
+# @v 1.7.3 | 2026-08-15 | App entry: main loop, sensor, MQTT publish, web dashboard, OTA, settings
 import tools
 tools.crc_check()
 
@@ -15,7 +15,7 @@ import gc
 import os
 import machine
 
-__version__ = "1.7.2"
+__version__ = "1.7.3"
 __date__ = "2026-AUG-15"
 __author__ = "Rick Jara"
 
@@ -105,19 +105,23 @@ def _banner_html():
     banner reports the state of the *link*, not the sensor.
     """
     global MQTT, WIFI
+
+    def _led(state, msg):
+        return ("<div class='status'><span class='led %s'></span>"
+                "<span>%s</span></div>" % (state, msg))
+
     if WIFI and not WIFI.is_connected():
-        return ("<div class='banner err'>WiFi disconnected &mdash; readings are "
-                "local only and nothing is reaching the broker</div>")
+        return _led("err", "WiFi disconnected &mdash; nothing is reaching the broker")
     if not MQTT:
         return ""
     secs = MQTT.seconds_since_ok()
     if not MQTT.connected or secs is None:
-        return ("<div class='banner err'>MQTT not connected to %s &mdash; %s</div>"
-                % (MQTT.mqtt.get("server", "?"), MQTT.last_error or "no successful publish yet"))
+        return _led("err", "MQTT not connected to %s &mdash; %s"
+                    % (MQTT.mqtt.get("server", "?"),
+                       MQTT.last_error or "no successful publish yet"))
     if secs > STALE_AFTER_S:
-        return ("<div class='banner warn'>No successful publish for %d s &mdash; "
-                "data on the cloud dashboard is stale</div>" % secs)
-    return "<div class='banner ok'>Publishing normally &mdash; last success %d s ago</div>" % secs
+        return _led("warn", "No successful publish for %d s &mdash; cloud data is stale" % secs)
+    return _led("ok", "Publishing normally &mdash; last success %d s ago" % secs)
 
 def _mqtt_state_text():
     global MQTT
@@ -138,6 +142,14 @@ def _last_pub_text():
     if secs < 7200:
         return "%d min ago" % (secs // 60)
     return "%d hours ago" % (secs // 3600)
+
+def _short_uptime(s):
+    """'0 days, 04 hours, 12 minutes' -> '0d04h12m', to fit one console line."""
+    try:
+        p = s.replace(",", "").split()
+        return "%sd%sh%sm" % (p[0], p[2], p[4])
+    except Exception:
+        return s
 
 def _counts_text():
     global MQTT
@@ -673,8 +685,9 @@ def main():
         color_printer.print_color("Time   : NOT synced - timestamps may be wrong", "yellow")
 
     EVENTS.set_clock(time_sync)
-    _causes = {1: "power on", 2: "hard reset", 3: "soft reset",
-               4: "watchdog reset", 5: "deep sleep wake"}
+
+    _causes = {1: "power on", 2: "hard reset", 3: "WATCHDOG reset",
+               4: "deep sleep wake", 5: "soft reboot"}
     try:
         _cause = _causes.get(machine.reset_cause(), "cause %s" % machine.reset_cause())
     except Exception:
@@ -766,8 +779,9 @@ def main():
                 heartbeat.feed()
 
             uptime = uptime_tracker.get_uptime_string()
-            color_printer.print_color("Uptime: ", "yellow", crlf=False)
-            color_printer.print_color(f"{uptime}", "blue")
+            if my_hw.VERBOSE:
+                color_printer.print_color("Uptime: ", "yellow", crlf=False)
+                color_printer.print_color(f"{uptime}", "blue")
 
             try:
                 tempC, presPa, humRH = sensor.values()
@@ -874,28 +888,33 @@ def main():
             except Exception as e:
                 color_printer.print_color(f"OTA apply error: {e}", "red")
 
-            color_printer.print_color("T: ", "white", crlf=False)
-            color_printer.print_color(f"{tempC:6.1f} °C", "red", crlf=False)
-            color_printer.print_color(", H: ", "white", crlf=False)
-            color_printer.print_color(f"{humRH:6.1f} %", "light_blue", crlf=False)
-            color_printer.print_color(", P: ", "white", crlf=False)
-            color_printer.print_color(f"{pres_hPa:6.0f} hPa", "blue", crlf=False)
+            if my_hw.VERBOSE:
+                color_printer.print_color("T: ", "white", crlf=False)
+                color_printer.print_color(f"{tempC:6.1f} °C", "red", crlf=False)
+                color_printer.print_color(", H: ", "white", crlf=False)
+                color_printer.print_color(f"{humRH:6.1f} %", "light_blue", crlf=False)
+                color_printer.print_color(", P: ", "white", crlf=False)
+                color_printer.print_color(f"{pres_hPa:6.0f} hPa", "blue", crlf=False)
+                color_printer.print_color(", TS: ", "white", crlf=False)
+                color_printer.print_color(f"{timestamp}", "blue")
 
-            color_printer.print_color(", TS: ", "white", crlf=False)
-            color_printer.print_color(f"{timestamp}", "blue")
-
-            _state = "OK " if (mqtt_manager.connected and published) else "BAD"
-            _col = "green" if _state == "OK " else "red"
-            color_printer.print_color("Status: ", "white", crlf=False)
+            try:
+                _rssi = wifi_manager.wlan.status('rssi')
+            except Exception:
+                _rssi = 0
+            _ok = mqtt_manager.connected and published
             color_printer.print_color(
-                "%s | wifi %s | mqtt %s | last pub %s | %s | web %s" % (
-                    _state,
-                    _wifi_text(),
-                    _mqtt_state_text(),
-                    _last_pub_text(),
-                    _mem_text(),
-                    "up" if (web_server and web_server.running) else "DOWN"),
-                _col)
+                "%s  %5.1fC %5.1f%% %6.0fhPa | mqtt %s %d/%d/%d | wifi %d | %dKB | web %s | up %s" % (
+                    timestamp[11:],
+                    tempC, humRH, pres_hPa,
+                    "OK " if mqtt_manager.connected else "DOWN",
+                    mqtt_manager.publish_ok, mqtt_manager.publish_fail,
+                    mqtt_manager.reconnects,
+                    _rssi,
+                    gc.mem_free() // 1024,
+                    "up" if (web_server and web_server.running) else "DOWN",
+                    _short_uptime(uptime)),
+                "green" if _ok else "red")
 
             if PRODUCTION:
                 heartbeat.feed()
